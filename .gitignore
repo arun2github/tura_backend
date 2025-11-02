@@ -1,0 +1,27 @@
+/.phpunit.cache
+/node_modules
+/public/build
+/public/hot
+/public/storage
+/storage/*.key
+/vendor
+/vendor1
+vendor.zip
+.env
+.env.backup
+.env.production
+.envbu
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
+auth.json
+npm-debug.log
+yarn-error.log
+/.fleet
+/.idea
+/.vscode
+
+# Test files (optional - you can remove these lines if you want to include test files)
+test_*.php
+test_*.html
+*.dart
