@@ -33,8 +33,21 @@ class JobAppliedStatus extends Model
         'user_id',
         'status',
         'stage',
+        'application_id',
+        'email',
+        'payment_amount',
+        'payment_status',
+        'email_sent',
+        'priority',
+        'category_applied',
+        'payment_transaction_id',
+        'payment_date',
+        'email_sent_at',
+        'job_applied_email_sent',
+        'payment_confirmation_email_sent',
         'inserted_at',
         'updated_at',
+        'created_at'
     ];
 
     /**
@@ -151,5 +164,69 @@ class JobAppliedStatus extends Model
     public function jobPosting()
     {
         return $this->belongsTo(JobPosting::class, 'job_id');
+    }
+
+    /**
+     * Generate unique application ID based on job title and timestamp
+     */
+    public function generateApplicationId($jobTitle)
+    {
+        // Clean job title - remove special characters and spaces, take first 3 words
+        $cleanTitle = preg_replace('/[^a-zA-Z0-9\s]/', '', $jobTitle);
+        $titleWords = explode(' ', $cleanTitle);
+        $shortTitle = strtoupper(implode('', array_slice($titleWords, 0, 3)));
+        
+        // Generate timestamp-based unique ID
+        $timestamp = now()->format('ymdHis'); // YYMMDDHHMMSS format
+        $randomSuffix = strtoupper(substr(uniqid(), -3)); // 3 random characters
+        
+        // Format: JOBTITLE-YYMMDDHHMMSS-XXX
+        $applicationId = "{$shortTitle}-{$timestamp}-{$randomSuffix}";
+        
+        // Ensure uniqueness by checking if it already exists
+        $counter = 1;
+        $originalId = $applicationId;
+        while (self::where('application_id', $applicationId)->exists()) {
+            $applicationId = "{$originalId}-{$counter}";
+            $counter++;
+        }
+        
+        return $applicationId;
+    }
+
+    /**
+     * Mark job application email as sent
+     */
+    public function markJobApplicationEmailSent()
+    {
+        $this->job_applied_email_sent = true;
+        $this->save();
+        return $this;
+    }
+
+    /**
+     * Mark payment confirmation email as sent
+     */
+    public function markPaymentConfirmationEmailSent()
+    {
+        $this->payment_confirmation_email_sent = true;
+        $this->save();
+        return $this;
+    }
+
+    /**
+     * Check if job application email was sent
+     */
+    public function isJobApplicationEmailSent()
+    {
+        return $this->job_applied_email_sent;
+    }
+
+    /**
+     * Check if payment confirmation email was sent
+     */
+    public function isPaymentConfirmationEmailSent()
+    {
+        return $this->payment_confirmation_email_sent;
     }
 }

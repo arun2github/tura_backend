@@ -1,0 +1,7 @@
+<!-- This is a placeholder - replace with actual logo -->
+<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="100" cy="100" r="90" fill="#3b82f6" stroke="#1d4ed8" stroke-width="4"/>
+  <text x="100" y="90" text-anchor="middle" font-family="Arial" font-size="20" font-weight="bold" fill="white">Tura</text>
+  <text x="100" y="115" text-anchor="middle" font-family="Arial" font-size="14" fill="white">Municipal</text>
+  <text x="100" y="130" text-anchor="middle" font-family="Arial" font-size="14" fill="white">Board</text>
+</svg>

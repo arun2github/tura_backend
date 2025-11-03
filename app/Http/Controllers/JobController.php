@@ -9,10 +9,12 @@ use App\Models\JobEmploymentDetail;
 use App\Models\JobQualification;
 use App\Models\JobAppliedStatus;
 use App\Models\JobDocumentUpload;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Schema;
+use PHPMailer\PHPMailer\PHPMailer;
 
 /**
  * JobController
@@ -68,7 +70,7 @@ class JobController extends Controller
                 'identification_mark' => 'required|string|max:255',
                 'permanent_address1' => 'required|string|max:255',
                 'permanent_address2' => 'required|string|max:255',
-                'permanent_landmark' => 'required|string|max:255',
+                'permanent_landmark' => 'nullable|string|max:255',
                 'permanent_village' => 'required|string|max:100',
                 'permanent_state' => 'required|string|max:100',
                 'permanent_district' => 'required|string|max:100',
@@ -76,13 +78,14 @@ class JobController extends Controller
                 'permanent_pincode' => 'required|string|max:10',
                 'present_address1' => 'required|string|max:255',
                 'present_address2' => 'required|string|max:255',
-                'present_landmark' => 'required|string|max:255',
+                'present_landmark' => 'nullable|string|max:255',
                 'present_village' => 'required|string|max:100',
                 'present_state' => 'required|string|max:100',
                 'present_district' => 'required|string|max:100',
                 'present_block' => 'nullable|string|max:100',
                 'present_pincode' => 'required|string|max:10',
                 'job_id' => 'required|integer',
+                'email' => 'required|email|max:255',
             ]);
 
             if ($validator->fails()) {
@@ -128,35 +131,61 @@ class JobController extends Controller
                 'present_district',
                 'present_block',
                 'present_pincode',
-                'job_id'
+                'job_id',
+                'email'
             ]);
 
             // Add user_id from authenticated user
             $data['user_id'] = $userId;
             $data['updated_at'] = now();
+            
+            // Set default values for optional landmark fields
+            $data['permanent_landmark'] = $data['permanent_landmark'] ?? null;
+            $data['present_landmark'] = $data['present_landmark'] ?? null;
 
             if ($existingRecord) {
                 // Update existing personal details record
                 $existingRecord->update($data);
+                
+                // Check if application status exists, if not create it
+                $applicationStatus = $this->getOrCreateApplicationStatus($userId, $request->job_id, $request->email);
                 
                 return response()->json([
                     'success' => true,
                     'message' => 'Personal details updated successfully',
                     'data' => $existingRecord->fresh(),
                     'action' => 'updated',
-                    'record_id' => $existingRecord->id
+                    'record_id' => $existingRecord->id,
+                    'application_id' => $applicationStatus['application_id'],
+                    'payment_amount' => $applicationStatus['payment_amount'],
+                    'email_sent' => $applicationStatus['email_sent']
                 ], 200);
             } else {
                 // Create new personal details record
                 $data['inserted_at'] = now();
                 $personalDetails = JobPersonalDetail::create($data);
 
+                // Generate Application ID and create application status
+                $applicationStatus = $this->createApplicationStatus($userId, $request->job_id, $request->email);
+                
+                // Send application confirmation email
+                $emailResult = $this->sendApplicationConfirmationEmail(
+                    $request->email,
+                    $applicationStatus['application_id'],
+                    $request->job_id,
+                    $authenticatedUser->firstname . ' ' . $authenticatedUser->lastname
+                );
+
                 return response()->json([
                     'success' => true,
                     'message' => 'Personal details saved successfully',
                     'data' => $personalDetails,
                     'action' => 'created',
-                    'record_id' => $personalDetails->id
+                    'record_id' => $personalDetails->id,
+                    'application_id' => $applicationStatus['application_id'],
+                    'payment_amount' => $applicationStatus['payment_amount'],
+                    'email_sent' => $emailResult['success'],
+                    'email_message' => $emailResult['message']
                 ], 201);
             }
 
@@ -170,6 +199,710 @@ class JobController extends Controller
                 'error' => $e->getMessage() // Add this for debugging
             ], 500);
         }
+    }
+
+    /**
+     * Create new application status with generated application ID
+     */
+    private function createApplicationStatus($userId, $jobId, $email)
+    {
+        // Generate unique Application ID
+        $applicationId = $this->generateApplicationId($jobId);
+        
+        // Get job details for payment calculation
+        $jobPosting = TuraJobPosting::find($jobId);
+        if (!$jobPosting) {
+            throw new \Exception("Job posting not found for ID: {$jobId}");
+        }
+        
+        // Calculate payment amount based on user's personal details category
+        $paymentAmount = $this->calculatePaymentAmount($userId, $jobId);
+        
+        // Create application status record
+        $applicationStatus = JobAppliedStatus::create([
+            'user_id' => $userId,
+            'job_id' => $jobId,
+            'application_id' => $applicationId,
+            'email' => $email,
+            'status' => 'personal_details_submitted',
+            'stage' => JobAppliedStatus::STAGES['personal_details'], // Stage 1 - personal details
+            'payment_amount' => $paymentAmount,
+            'payment_status' => 'pending',
+            'job_applied_email_sent' => false,
+            'inserted_at' => now(),
+            'updated_at' => now()
+        ]);
+        
+        return [
+            'application_id' => $applicationId,
+            'payment_amount' => $paymentAmount,
+            'email_sent' => false,
+            'status' => 'created'
+        ];
+    }
+    
+    /**
+     * Get existing application status or create new one
+     */
+    private function getOrCreateApplicationStatus($userId, $jobId, $email)
+    {
+        $existingStatus = JobAppliedStatus::where([
+            'user_id' => $userId,
+            'job_id' => $jobId
+        ])->first();
+        
+        if ($existingStatus) {
+            // Check if application_id is missing and generate it
+            if (!$existingStatus->application_id) {
+                $existingStatus->application_id = $this->generateApplicationId($jobId);
+            }
+            
+            // Check if payment_amount is missing and calculate it
+            if (!$existingStatus->payment_amount || $existingStatus->payment_amount == 0) {
+                $existingStatus->payment_amount = $this->calculatePaymentAmount($userId, $jobId);
+            }
+            
+            // Update email if provided
+            if ($email) {
+                $existingStatus->email = $email;
+            }
+            
+            // Save the updates
+            $existingStatus->save();
+            
+            // Send email if not sent yet
+            if (!$existingStatus->job_applied_email_sent && $existingStatus->email) {
+                $user = User::find($userId);
+                $emailResult = $this->sendApplicationConfirmationEmail(
+                    $existingStatus->email,
+                    $existingStatus->application_id,
+                    $jobId,
+                    $user->firstname . ' ' . $user->lastname
+                );
+                
+                if ($emailResult['success']) {
+                    $existingStatus->job_applied_email_sent = 1;
+                    $existingStatus->save();
+                }
+            }
+            
+            return [
+                'application_id' => $existingStatus->application_id,
+                'payment_amount' => $existingStatus->payment_amount,
+                'email_sent' => $existingStatus->job_applied_email_sent,
+                'status' => 'updated'
+            ];
+        }
+        
+        return $this->createApplicationStatus($userId, $jobId, $email);
+    }
+    
+    /**
+     * Generate unique Application ID format: TMB-YYYY-JOB{job_id}-{sequence}
+     */
+    private function generateApplicationId($jobId)
+    {
+        $year = date('Y');
+        $prefix = "TMB-{$year}-JOB{$jobId}-";
+        
+        // Get the latest application ID for this job to determine sequence
+        $latestApplication = JobAppliedStatus::where('job_id', $jobId)
+            ->where('application_id', 'LIKE', $prefix . '%')
+            ->orderBy('application_id', 'desc')
+            ->first();
+        
+        if ($latestApplication) {
+            // Extract sequence number and increment
+            $lastSequence = (int) str_replace($prefix, '', $latestApplication->application_id);
+            $sequence = str_pad($lastSequence + 1, 4, '0', STR_PAD_LEFT);
+        } else {
+            // First application for this job
+            $sequence = '0001';
+        }
+        
+        return $prefix . $sequence;
+    }
+    
+    /**
+     * Calculate payment amount based on user category and job posting fees
+     */
+    private function calculatePaymentAmount($userId, $jobId)
+    {
+        // Get job posting details
+        $jobPosting = TuraJobPosting::find($jobId);
+        if (!$jobPosting) {
+            return 0;
+        }
+        
+        // Get user's personal details to find category
+        $personalDetails = JobPersonalDetail::where([
+            'user_id' => $userId,
+            'job_id' => $jobId
+        ])->first();
+        
+        if (!$personalDetails) {
+            return $jobPosting->fee_general; // Default to general category
+        }
+        
+        $userCategory = strtoupper($personalDetails->category);
+        
+        switch ($userCategory) {
+            case 'SC':
+            case 'ST':
+                return $jobPosting->fee_sc_st ?? 0;
+            case 'OBC':
+                return $jobPosting->fee_obc ?? $jobPosting->fee_general;
+            case 'UR':
+            case 'GENERAL':
+            default:
+                return $jobPosting->fee_general ?? 0;
+        }
+    }
+    
+    /**
+     * Send application confirmation email with application ID
+     */
+    private function sendApplicationConfirmationEmail($email, $applicationId, $jobId, $fullName)
+    {
+        try {
+            // Get job details
+            $jobPosting = TuraJobPosting::find($jobId);
+            if (!$jobPosting) {
+                return ['success' => false, 'message' => 'Job posting not found'];
+            }
+            
+            // Initialize PHPMailer
+            $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+            
+            // Server settings
+            $mail->SMTPDebug = 0;
+            $mail->isSMTP();
+            $mail->Host = config('mail.mailers.smtp.host');
+            $mail->SMTPAuth = true;
+            $mail->Username = config('mail.mailers.smtp.username');
+            $mail->Password = config('mail.mailers.smtp.password');
+            $mail->SMTPSecure = config('mail.mailers.smtp.encryption');
+            $mail->Port = config('mail.mailers.smtp.port');
+            
+            // Recipients
+            $mail->setFrom(config('mail.from.address'), config('mail.from.name'));
+            $mail->addAddress($email);
+            
+            // Content
+            $mail->isHTML(true);
+            $mail->CharSet = 'UTF-8';
+            $mail->Encoding = 'base64';
+            $mail->Subject = 'Personal Details Submitted Successfully - Application ID: ' . $applicationId;
+            
+            // Add additional headers for better email client compatibility
+            $mail->addCustomHeader('X-Mailer', 'Tura Municipal Board System');
+            $mail->addCustomHeader('Content-Type', 'text/html; charset=UTF-8');
+            
+            // Email body with application details
+            $mail->Body = $this->generateApplicationConfirmationEmailTemplate($fullName, $applicationId, $jobPosting);
+            
+            $mail->send();
+            
+            // Update email sent flag
+            JobAppliedStatus::where('application_id', $applicationId)->update([
+                'job_applied_email_sent' => true
+            ]);
+            
+            return ['success' => true, 'message' => 'Application confirmation email sent successfully'];
+            
+        } catch (\Exception $e) {
+            Log::error('Error sending application confirmation email: ' . $e->getMessage());
+            return ['success' => false, 'message' => 'Failed to send confirmation email: ' . $e->getMessage()];
+        }
+    }
+    
+    /**
+     * Generate application confirmation email template
+     */
+    private function generateApplicationConfirmationEmailTemplate($fullName, $applicationId, $jobPosting)
+    {
+        $applicationUrl = config('app.url') . "/application-status/" . $applicationId;
+        $paymentUrl = config('app.url') . "/payment/" . $applicationId;
+        
+        return "
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset='utf-8'>
+            <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+            <title>Application Confirmation</title>
+        </head>
+        <body style='margin: 0; padding: 0; font-family: \"Times New Roman\", Times, serif; background-color: #f8f9fa; line-height: 1.6;'>
+            <div style='max-width: 700px; margin: 0 auto; background-color: #ffffff; border: 2px solid #1a365d; box-shadow: 0 4px 20px rgba(0,0,0,0.15);'>
+                <!-- Official Header -->
+                <div style='background: linear-gradient(135deg, #1a365d 0%, #2d5a87 100%); padding: 30px; text-align: center;'>
+                    <div style='margin-bottom: 15px;'>
+                        <img src='" . $this->getEmbeddedLogo() . "' alt='Tura Municipal Board Official Seal' style='max-width: 100px; height: auto; border: 3px solid #ffffff; border-radius: 50%; box-shadow: 0 6px 20px rgba(0,0,0,0.3);'>
+                    </div>
+                    
+                    <h1 style='color: #ffffff; margin: 0; font-size: 28px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.5); letter-spacing: 1px;'>
+                        Tura Municipal Board
+                    </h1>
+                    <div style='border-bottom: 2px solid #ffffff; width: 60%; margin: 10px auto;'></div>
+                    <p style='color: #e2e8f0; margin: 8px 0 5px 0; font-size: 16px; font-weight: 500;'>
+                        Government of Meghalaya
+                    </p>
+                    <p style='color: #cbd5e0; margin: 0; font-size: 14px; font-style: italic;'>
+                        Established: 12th September, 1979
+                    </p>
+                </div>
+                
+                <!-- Application Confirmation Notice -->
+                <div style='padding: 35px 40px;'>
+                    <div style='text-align: center; margin-bottom: 30px; border-bottom: 3px double #1a365d; padding-bottom: 20px;'>
+                        <div style='background: #22c55e; color: #ffffff; padding: 12px 25px; display: inline-block; border-radius: 25px; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(34, 197, 94, 0.3);'>
+                            <span style='font-size: 20px; margin-right: 8px;'>✅</span>
+                            <span style='font-weight: bold; font-size: 16px;'>PERSONAL DETAILS RECEIVED</span>
+                        </div>
+                        <h2 style='color: #1a365d; margin: 0 0 8px 0; font-size: 24px; font-weight: bold;'>
+                            PERSONAL DETAILS CONFIRMATION
+                        </h2>
+                        <p style='color: #2d5a87; font-size: 16px; margin: 0; font-weight: 500;'>
+                            Personal Details Successfully Recorded
+                        </p>
+                    </div>
+                    
+                    <!-- Application Details -->
+                    <div style='background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 25px; margin: 25px 0;'>
+                        <div style='text-align: right; margin-bottom: 20px; color: #1e40af; font-size: 12px; font-family: monospace;'>
+                            <strong>Ref No:</strong> " . $applicationId . "<br>
+                            <strong>Date:</strong> " . date('d/m/Y H:i:s') . "
+                        </div>
+                        
+                        <h3 style='color: #1a365d; margin: 0 0 20px 0; font-size: 18px; font-weight: bold; text-align: center;'>
+                            📋 APPLICATION DETAILS
+                        </h3>
+                        
+                        <table style='width: 100%; border-collapse: collapse; margin: 15px 0;'>
+                            <tr>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; background: #f8fafc; font-weight: bold;'>Application ID:</td>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; font-family: monospace; color: #dc2626; font-weight: bold;'>" . $applicationId . "</td>
+                            </tr>
+                            <tr>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; background: #f8fafc; font-weight: bold;'>Applicant Name:</td>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0;'>" . htmlspecialchars($fullName) . "</td>
+                            </tr>
+                            <tr>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; background: #f8fafc; font-weight: bold;'>Job Position:</td>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0;'>" . htmlspecialchars($jobPosting->job_title_department) . "</td>
+                            </tr>
+                            <tr>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; background: #f8fafc; font-weight: bold;'>Category:</td>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0;'>" . $jobPosting->category . "</td>
+                            </tr>
+                            <tr>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; background: #f8fafc; font-weight: bold;'>Submission Date:</td>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0;'>" . date('d-m-Y H:i:s') . "</td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <!-- Next Steps -->
+                    <div style='background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; padding: 25px; margin: 25px 0;'>
+                        <h4 style='color: #92400e; margin: 0 0 15px 0; font-size: 16px; font-weight: bold; text-align: center;'>
+                            📝 NEXT STEPS TO COMPLETE YOUR APPLICATION
+                        </h4>
+                        <div style='background: #ffffff; padding: 20px; border-radius: 6px; border: 1px solid #f59e0b;'>
+                            <ol style='color: #92400e; line-height: 1.8; margin: 0; padding-left: 25px; font-size: 14px;'>
+                                <li><strong>Complete Employment Details:</strong> Submit your employment history and work experience</li>
+                                <li><strong>Add Educational Qualifications:</strong> Upload details of your academic qualifications</li>
+                                <li><strong>Upload Required Documents:</strong> Submit all mandatory documents (Photo, Signature, Certificates, etc.)</li>
+                                <li><strong>Make Application Payment:</strong> Pay the required application fee to finalize submission</li>
+                                <li><strong>Submit Final Application:</strong> Review and submit your complete application</li>
+                            </ol>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div style='text-align: center; margin: 30px 0;'>
+                        <a href='" . $applicationUrl . "' style='display: inline-block; background: linear-gradient(135deg, #1a365d 0%, #2d5a87 100%); color: #ffffff; text-decoration: none; padding: 15px 30px; border-radius: 6px; font-weight: bold; font-size: 16px; margin: 10px; box-shadow: 0 4px 15px rgba(26, 54, 93, 0.3);'>
+                            📊 Continue Application
+                        </a>
+                    </div>
+                    
+                    <!-- Important Notice -->
+                    <div style='background: #fee2e2; border: 2px solid #dc2626; border-radius: 8px; padding: 20px; margin: 25px 0;'>
+                        <h4 style='color: #dc2626; margin: 0 0 10px 0; font-size: 16px; font-weight: bold; text-align: center;'>
+                            ⚠️ IMPORTANT NOTICE
+                        </h4>
+                        <p style='color: #dc2626; margin: 0; font-size: 14px; line-height: 1.6; text-align: justify;'>
+                            This is only the <strong>first step</strong> of your job application process. Your personal details have been successfully recorded. You still need to complete employment details, educational qualifications, document uploads, and payment to finalize your application. Please save your Application ID <strong>" . $applicationId . "</strong> for future reference.
+                        </p>
+                    </div>
+                </div>
+                
+                <!-- Official Footer -->
+                <div style='background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%); padding: 25px; text-align: center; border-top: 4px solid #d69e2e;'>
+                    <p style='color: #e2e8f0; margin: 0 0 10px 0; font-size: 16px; font-weight: bold;'>
+                        🏛️ Tura Municipal Board
+                    </p>
+                    <p style='color: #a0aec0; margin: 0; font-size: 13px;'>
+                        This is an official communication. Please do not reply to this email.
+                    </p>
+                    <div style='margin-top: 15px;'>
+                        <p style='color: #718096; margin: 0; font-size: 12px;'>
+                            © " . date('Y') . " Government of Meghalaya | Digital India Initiative
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>";
+    }
+
+    /**
+     * Get embedded logo as base64 data URL for email compatibility
+     */
+    private function getEmbeddedLogo()
+    {
+        // Prefer using the hosted file URL for emails to avoid embedding very large base64 strings
+        $logoPath = public_path('images/email/logo.png');
+
+        if (file_exists($logoPath)) {
+            try {
+                // Return a fully qualified asset URL (email clients may still block external images,
+                // but this avoids injecting massive base64 inline data into the HTML body)
+                return asset('images/email/logo.png');
+            } catch (\Exception $e) {
+                Log::error('Error generating asset URL for logo: ' . $e->getMessage());
+            }
+        }
+
+        // Fallback: Create a compact SVG data URL so we always have a logo
+        $placeholderSvg = '<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">'
+            . '<defs><linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">'
+            . '<stop offset="0%" style="stop-color:#1a365d;stop-opacity:1" />'
+            . '<stop offset="100%" style="stop-color:#2d5a87;stop-opacity:1" />'
+            . '</linearGradient></defs>'
+            . '<circle cx="50" cy="50" r="45" fill="url(#grad1)" stroke="#ffffff" stroke-width="3"/>'
+            . '<text x="50" y="56" text-anchor="middle" fill="#ffffff" font-family="serif" font-size="16" font-weight="bold">TMB</text>'
+            . '</svg>';
+
+        return 'data:image/svg+xml;base64,' . base64_encode($placeholderSvg);
+    }
+
+    /**
+     * Save selected jobs for a user with application ID
+     * Links jobs to applications and manages application status
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function saveSelectedJobs(Request $request)
+    {
+        try {
+            // Get authenticated user from JWT middleware
+            $authenticatedUser = $request->input('authenticated_user');
+            
+            $validator = Validator::make($request->all(), [
+                'job_ids' => 'required|array|min:1',
+                'job_ids.*' => 'required|integer|exists:tura_job_postings,id',
+                'application_preferences' => 'nullable|array',
+                'application_preferences.*.job_id' => 'integer',
+                'application_preferences.*.priority' => 'integer|min:1|max:10',
+                'application_preferences.*.category_applied' => 'string|max:20',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 400);
+            }
+
+            $userId = $authenticatedUser->id;
+            $selectedJobs = [];
+            $existingApplications = [];
+            $errors = [];
+
+            // Process each selected job
+            foreach ($request->job_ids as $jobId) {
+                try {
+                    // Check if application already exists
+                    $existingApplication = JobAppliedStatus::where([
+                        'user_id' => $userId,
+                        'job_id' => $jobId
+                    ])->first();
+
+                    if ($existingApplication) {
+                        $existingApplications[] = [
+                            'job_id' => $jobId,
+                            'application_id' => $existingApplication->application_id,
+                            'status' => $existingApplication->status,
+                            'created_at' => $existingApplication->created_at,
+                            'message' => 'Application already exists for this job'
+                        ];
+                        continue;
+                    }
+
+                    // Get job details
+                    $jobPosting = TuraJobPosting::find($jobId);
+                    if (!$jobPosting) {
+                        $errors[] = [
+                            'job_id' => $jobId,
+                            'error' => 'Job posting not found'
+                        ];
+                        continue;
+                    }
+
+                    // Check if job applications are open
+                    if (!$jobPosting->isApplicationOpen()) {
+                        $errors[] = [
+                            'job_id' => $jobId,
+                            'job_title' => $jobPosting->job_title_department,
+                            'error' => 'Applications are not open for this job',
+                            'application_start_date' => $jobPosting->application_start_date,
+                            'application_end_date' => $jobPosting->application_end_date
+                        ];
+                        continue;
+                    }
+
+                    // Generate Application ID
+                    $applicationId = $this->generateApplicationId($jobId);
+                    
+                    // Calculate payment amount based on user category
+                    $paymentAmount = $this->calculatePaymentAmount($userId, $jobId);
+                    
+                    // Get application preferences for this job
+                    $preferences = collect($request->application_preferences ?? [])->firstWhere('job_id', $jobId);
+                    
+                    // Create application status record
+                    $applicationData = [
+                        'user_id' => $userId,
+                        'job_id' => $jobId,
+                        'application_id' => $applicationId,
+                        'email' => $authenticatedUser->email,
+                        'status' => 'job_selected',
+                        'stage' => JobAppliedStatus::STAGES['job_selection'], // Stage 0 - job selection
+                        'payment_amount' => $paymentAmount,
+                        'payment_status' => 'pending',
+                        'job_applied_email_sent' => false,
+                        'priority' => $preferences['priority'] ?? 1,
+                        'category_applied' => $preferences['category_applied'] ?? $authenticatedUser->category ?? 'UR',
+                        'inserted_at' => now(),
+                        'updated_at' => now()
+                    ];
+
+                    $applicationStatus = JobAppliedStatus::create($applicationData);
+                    
+                    // Send job selection confirmation email
+                    $emailResult = $this->sendJobSelectionConfirmationEmail(
+                        $authenticatedUser->email,
+                        $applicationId,
+                        $jobPosting,
+                        $authenticatedUser->firstname . ' ' . $authenticatedUser->lastname
+                    );
+
+                    // Update email sent flag if successful
+                    if ($emailResult['success']) {
+                        $applicationStatus->update(['job_applied_email_sent' => true]);
+                    }
+
+                    $selectedJobs[] = [
+                        'job_id' => $jobId,
+                        'application_id' => $applicationId,
+                        'job_title' => $jobPosting->job_title_department,
+                        'category' => $jobPosting->category,
+                        'payment_amount' => $paymentAmount,
+                        'priority' => $applicationData['priority'],
+                        'category_applied' => $applicationData['category_applied'],
+                        'email_sent' => $emailResult['success'],
+                        'created_at' => $applicationStatus->created_at
+                    ];
+
+                } catch (\Exception $e) {
+                    $errors[] = [
+                        'job_id' => $jobId,
+                        'error' => $e->getMessage()
+                    ];
+                    Log::error("Error processing job selection for job {$jobId}: " . $e->getMessage());
+                }
+            }
+
+            // Prepare response
+            $response = [
+                'success' => true,
+                'message' => 'Job selection processing completed',
+                'summary' => [
+                    'total_jobs_submitted' => count($request->job_ids),
+                    'successfully_selected' => count($selectedJobs),
+                    'existing_applications' => count($existingApplications),
+                    'errors_occurred' => count($errors)
+                ],
+                'data' => [
+                    'selected_jobs' => $selectedJobs,
+                ]
+            ];
+
+            // Add existing applications and errors if any
+            if (!empty($existingApplications)) {
+                $response['data']['existing_applications'] = $existingApplications;
+            }
+
+            if (!empty($errors)) {
+                $response['data']['error_jobs'] = $errors;
+            }
+
+            // Determine HTTP status code
+            if (count($selectedJobs) > 0) {
+                $statusCode = 201; // Created
+            } else if (count($existingApplications) > 0) {
+                $statusCode = 200; // OK - existing applications found
+            } else {
+                $statusCode = 400; // Bad Request - errors occurred
+                $response['success'] = false;
+                $response['message'] = 'Failed to select jobs';
+            }
+
+            return response()->json($response, $statusCode);
+
+        } catch (\Exception $e) {
+            Log::error('Error in saveSelectedJobs: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error processing job selection',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Send job selection confirmation email
+     */
+    private function sendJobSelectionConfirmationEmail($email, $applicationId, $jobPosting, $fullName)
+    {
+        try {
+            $mail = new PHPMailer(true);
+            
+            // Server settings
+            $mail->SMTPDebug = 0;
+            $mail->isSMTP();
+            $mail->Host = config('mail.mailers.smtp.host');
+            $mail->SMTPAuth = true;
+            $mail->Username = config('mail.mailers.smtp.username');
+            $mail->Password = config('mail.mailers.smtp.password');
+            $mail->SMTPSecure = config('mail.mailers.smtp.encryption');
+            $mail->Port = config('mail.mailers.smtp.port');
+            
+            // Recipients
+            $mail->setFrom(config('mail.from.address'), config('mail.from.name'));
+            $mail->addAddress($email);
+            
+            // Content
+            $mail->isHTML(true);
+            $mail->CharSet = 'UTF-8';
+            $mail->Encoding = 'base64';
+            $mail->Subject = 'Job Selected Successfully - Application ID: ' . $applicationId;
+            
+            // Add additional headers for better email client compatibility
+            $mail->addCustomHeader('X-Mailer', 'Tura Municipal Board System');
+            $mail->addCustomHeader('Content-Type', 'text/html; charset=UTF-8');
+            
+            // Email body
+            $mail->Body = $this->generateJobSelectionEmailTemplate($fullName, $applicationId, $jobPosting);
+            
+            $mail->send();
+            
+            return ['success' => true, 'message' => 'Job selection confirmation email sent successfully'];
+            
+        } catch (\Exception $e) {
+            Log::error('Error sending job selection email: ' . $e->getMessage());
+            return ['success' => false, 'message' => 'Failed to send confirmation email: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Generate job selection email template
+     */
+    private function generateJobSelectionEmailTemplate($fullName, $applicationId, $jobPosting)
+    {
+        $applicationUrl = config('app.url') . "/application/" . $applicationId;
+        
+        return "
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset='utf-8'>
+            <title>Job Selection Confirmation</title>
+        </head>
+        <body style='margin: 0; padding: 0; font-family: \"Times New Roman\", serif; background-color: #f8f9fa;'>
+            <div style='max-width: 700px; margin: 0 auto; background: #ffffff; border: 2px solid #1a365d;'>
+                <!-- Header -->
+                <div style='background: linear-gradient(135deg, #1a365d 0%, #2d5a87 100%); padding: 30px; text-align: center;'>
+                    <img src='" . $this->getEmbeddedLogo() . "' alt='Tura Municipal Board' style='max-width: 100px; height: auto; border: 3px solid #ffffff; border-radius: 50%;'>
+                    <h1 style='color: #ffffff; margin: 10px 0; font-size: 28px; font-weight: bold;'>Tura Municipal Board</h1>
+                    <p style='color: #e2e8f0; margin: 0; font-size: 16px;'>Government of Meghalaya</p>
+                </div>
+                
+                <!-- Content -->
+                <div style='padding: 35px 40px;'>
+                    <div style='text-align: center; margin-bottom: 30px;'>
+                        <div style='background: #10b981; color: #ffffff; padding: 12px 25px; display: inline-block; border-radius: 25px; margin-bottom: 15px;'>
+                            <span style='font-size: 20px; margin-right: 8px;'>✅</span>
+                            <span style='font-weight: bold;'>JOB SELECTED</span>
+                        </div>
+                        <h2 style='color: #1a365d; margin: 0; font-size: 24px;'>Job Selection Confirmed</h2>
+                    </div>
+                    
+                    <!-- Job Details -->
+                    <div style='background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 25px; margin: 25px 0;'>
+                        <h3 style='color: #1a365d; margin: 0 0 15px 0; text-align: center;'>📋 JOB DETAILS</h3>
+                        <table style='width: 100%; border-collapse: collapse;'>
+                            <tr>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; background: #f8fafc; font-weight: bold;'>Application ID:</td>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; font-family: monospace; color: #dc2626; font-weight: bold;'>" . $applicationId . "</td>
+                            </tr>
+                            <tr>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; background: #f8fafc; font-weight: bold;'>Job Title:</td>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0;'>" . htmlspecialchars($jobPosting->job_title_department) . "</td>
+                            </tr>
+                            <tr>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; background: #f8fafc; font-weight: bold;'>Category:</td>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0;'>" . $jobPosting->category . "</td>
+                            </tr>
+                            <tr>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0; background: #f8fafc; font-weight: bold;'>Pay Scale:</td>
+                                <td style='padding: 8px; border: 1px solid #cbd5e0;'>" . htmlspecialchars($jobPosting->pay_scale) . "</td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <!-- Next Steps -->
+                    <div style='background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; padding: 20px; margin: 25px 0;'>
+                        <h4 style='color: #92400e; margin: 0 0 15px 0; text-align: center;'>📝 COMPLETE YOUR APPLICATION</h4>
+                        <ol style='color: #92400e; line-height: 1.8; margin: 0; padding-left: 25px;'>
+                            <li>Submit Personal Details</li>
+                            <li>Add Employment History</li>
+                            <li>Upload Educational Qualifications</li>
+                            <li>Submit Required Documents</li>
+                            <li>Make Payment & Final Submission</li>
+                        </ol>
+                    </div>
+                    
+                    <!-- Action Button -->
+                    <div style='text-align: center; margin: 30px 0;'>
+                        <a href='" . $applicationUrl . "' style='background: #1a365d; color: #ffffff; text-decoration: none; padding: 15px 30px; border-radius: 6px; font-weight: bold; font-size: 16px;'>
+                            📊 Continue Application
+                        </a>
+                    </div>
+                </div>
+                
+                <!-- Footer -->
+                <div style='background: #1a202c; padding: 25px; text-align: center;'>
+                    <p style='color: #e2e8f0; margin: 0; font-size: 16px; font-weight: bold;'>🏛️ Tura Municipal Board</p>
+                    <p style='color: #a0aec0; margin: 5px 0 0 0; font-size: 13px;'>This is an official communication. Please do not reply.</p>
+                </div>
+            </div>
+        </body>
+        </html>";
     }
 
     /**
@@ -1967,16 +2700,17 @@ class JobController extends Controller
                 'job_id' => $jobId,
                 'application_status' => [
                     'id' => $applicationStatus->id,
+                    'application_id' => $applicationStatus->application_id,
                     'status' => $applicationStatus->status,
                     'current_stage' => $applicationStatus->stage,
                     'current_stage_name' => $applicationStatus->getCurrentStageName(),
                     'is_completed' => $applicationStatus->isCompleted(),
                 ],
                 'progress' => [
-                    'completion_percentage' => $this->calculateCompletionPercentage($completedSections),
+                    'completion_percentage' => $this->calculateCompletionPercentage($completedSections, $applicationStatus),
                     'completed_sections' => array_keys(array_filter($completedSections)),
                     'next_section' => $nextSection,
-                    'sections_status' => $this->buildCompleteSectionsStatus($completedSections, $applicationStatus->stage)
+                    'sections_status' => $this->buildCompleteSectionsStatus($completedSections, $applicationStatus->stage, $applicationStatus)
                 ],
                 'redirect_to' => [
                     'section' => $nextSection,
@@ -2082,12 +2816,12 @@ class JobController extends Controller
     {
         if ($completedSections['document_upload']) {
             return JobAppliedStatus::STAGES['print_application'];
-        } elseif ($completedSections['qualification_details']) {
-            return JobAppliedStatus::STAGES['file_upload'];
         } elseif ($completedSections['employment_details']) {
-            return JobAppliedStatus::STAGES['qualification'];
-        } elseif ($completedSections['personal_details']) {
+            return JobAppliedStatus::STAGES['file_upload'];
+        } elseif ($completedSections['qualification_details']) {
             return JobAppliedStatus::STAGES['employment'];
+        } elseif ($completedSections['personal_details']) {
+            return JobAppliedStatus::STAGES['qualification'];
         } else {
             return JobAppliedStatus::STAGES['personal_details'];
         }
@@ -2100,10 +2834,10 @@ class JobController extends Controller
     {
         if (!$completedSections['personal_details']) {
             return 'personal_details';
-        } elseif (!$completedSections['employment_details']) {
-            return 'employment_details';
         } elseif (!$completedSections['qualification_details']) {
             return 'qualification_details';
+        } elseif (!$completedSections['employment_details']) {
+            return 'employment_details';
         } elseif (!$completedSections['document_upload']) {
             return 'file_upload';
         } else {
@@ -2114,32 +2848,45 @@ class JobController extends Controller
     /**
      * Calculate completion percentage based on JobAppliedStatus 8-stage system
      */
-    private function calculateCompletionPercentage($completedSections)
+    private function calculateCompletionPercentage($completedSections, $applicationStatus = null)
     {
         // JobAppliedStatus has 8 stages (0-7), so total stages = 8
         $totalStages = count(JobAppliedStatus::STAGES);
         
-        // Count completed stages based on the 4-section system
+        // Count completed stages based on the correct flow: personal -> qualification -> employment -> documents
         $completedStages = 1; // Stage 0 (job_selection) is completed when we reach this method
         
         if ($completedSections['personal_details']) {
             $completedStages = 2; // Stage 1 (personal_details) completed
         }
         
-        if ($completedSections['employment_details']) {
-            $completedStages = 3; // Stage 2 (qualification) - we track employment but stage is qualification
+        if ($completedSections['qualification_details']) {
+            $completedStages = 3; // Stage 2 (qualification) completed
         }
         
-        if ($completedSections['qualification_details']) {
-            $completedStages = 4; // Stage 3 (employment) - we track qualification but stage is employment  
+        if ($completedSections['employment_details']) {
+            $completedStages = 4; // Stage 3 (employment) completed  
         }
         
         if ($completedSections['document_upload']) {
             $completedStages = 5; // Stage 4 (file_upload) completed
         }
         
-        // Note: Stages 5-7 (application_summary, payment, print_application) 
-        // are not tracked in this 4-section system but exist in JobAppliedStatus
+        // Check if application summary is ready (all previous sections completed)
+        if ($completedSections['document_upload']) {
+            $completedStages = 6; // Stage 5 (application_summary) completed
+        }
+        
+        // Check if payment is actually completed (payment_status = 'paid')
+        if ($applicationStatus && $applicationStatus->payment_status === 'paid') {
+            $completedStages = 7; // Stage 6 (payment) completed
+        }
+        
+        // Print application is only completed after payment
+        if ($applicationStatus && $applicationStatus->payment_status === 'paid' && 
+            $applicationStatus->stage >= JobAppliedStatus::STAGES['print_application']) {
+            $completedStages = 8; // Stage 7 (print_application) completed
+        }
         
         return round(($completedStages / $totalStages) * 100, 2);
     }
@@ -2147,9 +2894,15 @@ class JobController extends Controller
     /**
      * Build complete sections status including all 8 stages from JobAppliedStatus
      */
-    private function buildCompleteSectionsStatus($completedSections, $currentStage)
+    private function buildCompleteSectionsStatus($completedSections, $currentStage, $applicationStatus = null)
     {
-        // Map the 4-section system to all 8 stages
+        // Check if payment is actually completed (payment_status = 'paid')
+        $paymentCompleted = false;
+        if ($applicationStatus && $applicationStatus->payment_status === 'paid') {
+            $paymentCompleted = true;
+        }
+
+        // Map the 4-section system to all 8 stages in correct order: personal -> qualification -> employment -> documents
         $allSectionsStatus = [
             'job_selection' => true, // Always true when we reach this method with job_id
             'personal_details' => $completedSections['personal_details'],
@@ -2157,8 +2910,8 @@ class JobController extends Controller
             'employment' => $completedSections['employment_details'],
             'file_upload' => $completedSections['document_upload'],
             'application_summary' => $currentStage >= JobAppliedStatus::STAGES['application_summary'],
-            'payment' => $currentStage >= JobAppliedStatus::STAGES['payment'],
-            'print_application' => $currentStage >= JobAppliedStatus::STAGES['print_application']
+            'payment' => $paymentCompleted, // Only completed when payment_status = 'paid'
+            'print_application' => $paymentCompleted && $currentStage >= JobAppliedStatus::STAGES['print_application']
         ];
 
         return $allSectionsStatus;
@@ -2183,10 +2936,41 @@ class JobController extends Controller
             \Log::warning('Failed to get personal details: ' . $e->getMessage());
         }
 
-        // Calculate payment details if both personal details and job exist
+        // Get payment details from tura_job_applied_status
         $paymentDetails = null;
-        if ($personalDetails && $selectedJob) {
-            $paymentDetails = $this->calculateApplicationFee($personalDetails, $selectedJob);
+        try {
+            $applicationStatus = JobAppliedStatus::where([
+                'user_id' => $userId,
+                'job_id' => $jobId
+            ])->first();
+            
+            if ($applicationStatus) {
+                $paymentDetails = [
+                    'applicable_fee' => $applicationStatus->payment_amount,
+                    'payment_status' => $applicationStatus->payment_status,
+                    'payment_transaction_id' => $applicationStatus->payment_transaction_id ?? null,
+                    'payment_date' => $applicationStatus->payment_date ?? null,
+                    'job_applied_email_sent' => $applicationStatus->job_applied_email_sent,
+                    'payment_confirmation_email_sent' => $applicationStatus->payment_confirmation_email_sent ?? false,
+                ];
+                
+                // Add additional context if personal details exist
+                if ($personalDetails) {
+                    $paymentDetails['category'] = strtolower($personalDetails->category);
+                    $paymentDetails['fee_type'] = $this->getCategoryFeeType($personalDetails->category);
+                }
+                
+                if ($selectedJob) {
+                    $paymentDetails['pay_scale'] = $selectedJob->pay_scale;
+                    $paymentDetails['fee_breakdown'] = [
+                        'general_fee' => $selectedJob->fee_general,
+                        'sc_st_fee' => $selectedJob->fee_sc_st,
+                        'obc_fee' => $selectedJob->fee_obc
+                    ];
+                }
+            }
+        } catch (\Exception $e) {
+            \Log::warning('Failed to get payment details from application status: ' . $e->getMessage());
         }
 
         // Get employment details
@@ -2256,9 +3040,9 @@ class JobController extends Controller
     {
         $messages = [
             'personal_details' => 'Please fill your personal details to start the application',
-            'employment_details' => 'Personal details saved! Now add your employment history',
-            'qualification_details' => 'Employment details saved! Now add your educational qualifications',
-            'file_upload' => 'Qualification details saved! Now upload required documents',
+            'qualification_details' => 'Personal details saved! Now add your educational qualifications',
+            'employment_details' => 'Qualification details saved! Now add your employment history',
+            'file_upload' => 'Employment details saved! Now upload required documents',
             'application_summary' => 'Documents uploaded! Review your application summary',
             'payment' => 'Application summary complete! Proceed to payment',
             'print_application' => 'Payment successful! Print your application',
@@ -2266,6 +3050,22 @@ class JobController extends Controller
         ];
 
         return $messages[$nextSection] ?? 'Continue with your application';
+    }
+
+    /**
+     * Get fee type display name based on category
+     */
+    private function getCategoryFeeType($category)
+    {
+        $feeTypes = [
+            'SC' => 'SC/ST',
+            'ST' => 'SC/ST', 
+            'OBC' => 'OBC',
+            'UR' => 'General',
+            'General' => 'General'
+        ];
+
+        return $feeTypes[$category] ?? 'General';
     }
 
     /**
@@ -2522,6 +3322,9 @@ class JobController extends Controller
                         'status' => $existingApplication->status,
                         'stage' => (int) $existingApplication->stage,
                         'stage_name' => $existingApplication->getCurrentStageName(),
+                        'application_id' => $existingApplication->application_id,
+                        'job_applied_email_sent' => $existingApplication->job_applied_email_sent,
+                        'payment_confirmation_email_sent' => $existingApplication->payment_confirmation_email_sent,
                         'inserted_at' => $existingApplication->inserted_at,
                         'updated_at' => $existingApplication->updated_at,
                         'changes_made' => [
@@ -2557,8 +3360,12 @@ class JobController extends Controller
             $jobApplicationStatus = JobAppliedStatus::create([
                 'user_id' => $userId,
                 'job_id' => $jobId,
+                'email' => $authenticatedUser->email, // Add required email field
                 'status' => $newStatus ?? JobAppliedStatus::STATUSES['in_progress'],
                 'stage' => $newStage ?? JobAppliedStatus::STAGES['job_selection'], // Start with stage 0
+                'application_id' => null, // Will be generated after personal details
+                'job_applied_email_sent' => false,
+                'payment_confirmation_email_sent' => false,
                 'inserted_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -2574,6 +3381,9 @@ class JobController extends Controller
                     'status' => $jobApplicationStatus->status,
                     'stage' => (int) $jobApplicationStatus->stage,
                     'stage_name' => $jobApplicationStatus->getCurrentStageName(),
+                    'application_id' => $jobApplicationStatus->application_id,
+                    'job_applied_email_sent' => $jobApplicationStatus->job_applied_email_sent,
+                    'payment_confirmation_email_sent' => $jobApplicationStatus->payment_confirmation_email_sent,
                     'inserted_at' => $jobApplicationStatus->inserted_at,
                     'updated_at' => $jobApplicationStatus->updated_at,
                     'is_new_application' => true,
@@ -2602,6 +3412,638 @@ class JobController extends Controller
                 'message' => 'Error saving selected job',
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Generate application ID and send job application email
+     * This should be called after personal details are successfully saved
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function generateApplicationIdAndSendEmail(Request $request)
+    {
+        try {
+            // Get authenticated user from JWT middleware
+            $authenticatedUser = $request->input('authenticated_user');
+            $userId = $authenticatedUser->id;
+
+            $validator = Validator::make($request->all(), [
+                'job_id' => 'required|integer|exists:tura_job_postings,id',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 400);
+            }
+
+            $jobId = $request->job_id;
+
+            // Find the job application
+            $jobApplication = JobAppliedStatus::where([
+                'user_id' => $userId,
+                'job_id' => $jobId
+            ])->first();
+
+            if (!$jobApplication) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Job application not found. Please select a job first.'
+                ], 404);
+            }
+
+            // Check if application ID already exists
+            if ($jobApplication->application_id) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Application ID already exists',
+                    'data' => [
+                        'application_id' => $jobApplication->application_id,
+                        'job_applied_email_sent' => $jobApplication->job_applied_email_sent,
+                        'message' => 'Application ID was already generated for this application.'
+                    ]
+                ], 200);
+            }
+
+            // Get job details for application ID generation
+            $job = TuraJobPosting::find($jobId);
+            if (!$job) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Job not found'
+                ], 404);
+            }
+
+            // Generate application ID
+            $applicationId = $jobApplication->generateApplicationId($job->job_title_department);
+            $jobApplication->application_id = $applicationId;
+            $jobApplication->save();
+
+            // Send job application email if not already sent
+            if (!$jobApplication->isJobApplicationEmailSent()) {
+                try {
+                    $this->sendJobApplicationEmail($authenticatedUser, $job, $applicationId);
+                    $jobApplication->markJobApplicationEmailSent();
+                    $emailSent = true;
+                    $emailMessage = 'Job application email sent successfully';
+                } catch (\Exception $e) {
+                    Log::error('Error sending job application email: ' . $e->getMessage());
+                    $emailSent = false;
+                    $emailMessage = 'Application ID generated but email sending failed: ' . $e->getMessage();
+                }
+            } else {
+                $emailSent = false;
+                $emailMessage = 'Email was already sent for this application';
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Application ID generated successfully',
+                'data' => [
+                    'application_id' => $applicationId,
+                    'job_applied_email_sent' => $jobApplication->job_applied_email_sent,
+                    'email_sent_now' => $emailSent,
+                    'email_message' => $emailMessage,
+                    'job_details' => [
+                        'id' => $job->id,
+                        'job_title_department' => $job->job_title_department,
+                        'category' => $job->category
+                    ]
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error('Error generating application ID: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error generating application ID',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Send job application confirmation email
+     *
+     * @param User $user
+     * @param TuraJobPosting $job
+     * @param string $applicationId
+     * @return bool
+     */
+    private function sendJobApplicationEmail($user, $job, $applicationId)
+    {
+        // Initialize PHPMailer
+        $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+
+        try {
+            // Server settings
+            $mail->SMTPDebug = 0; // Disable debug output
+            $mail->isSMTP(); // Set mailer to use SMTP
+            $mail->Host = config('mail.mailers.smtp.host'); // SMTP server
+            $mail->SMTPAuth = true; // Enable SMTP authentication
+            $mail->Username = config('mail.mailers.smtp.username'); // SMTP username
+            $mail->Password = config('mail.mailers.smtp.password'); // SMTP password
+            $mail->SMTPSecure = config('mail.mailers.smtp.encryption'); // Encryption type (tls/ssl)
+            $mail->Port = config('mail.mailers.smtp.port'); // SMTP port
+
+            // Sender and recipient
+            $mail->setFrom(config('mail.from.address'), config('mail.from.name'));
+            $mail->addAddress($user->email); // Add recipient email
+            
+            // Subject
+            $mail->Subject = 'Job Application Confirmation - Application ID: ' . $applicationId;
+
+            // Email content
+            $mail->isHTML(true); // Set email format to HTML
+            $mail->CharSet = 'UTF-8';
+            $mail->Encoding = 'base64';
+            
+            // Add additional headers for better email client compatibility
+            $mail->addCustomHeader('X-Mailer', 'Tura Municipal Board System');
+            $mail->addCustomHeader('Content-Type', 'text/html; charset=UTF-8');
+            
+            // HTML body content - Creative Professional Template
+            $mail->Body = "
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset='utf-8'>
+                    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+                    <title>Job Application Confirmation</title>
+                </head>
+                <body style='margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f7fa;'>
+                    <div style='max-width: 650px; margin: 0 auto; background-color: #ffffff;'>
+                        <!-- Header -->
+                        <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;'>
+                            <h1 style='color: #ffffff; margin: 0; font-size: 32px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.3);'>
+                                🏛️ Tura Municipal Board
+                            </h1>
+                            <p style='color: #e8f2ff; margin: 10px 0 0 0; font-size: 16px; font-weight: 300;'>
+                                Government of Meghalaya
+                            </p>
+                        </div>
+                        
+                        <!-- Main Content -->
+                        <div style='padding: 40px 30px;'>
+                            <!-- Greeting -->
+                            <div style='margin-bottom: 30px;'>
+                                <h2 style='color: #2d3748; margin: 0 0 15px 0; font-size: 24px;'>
+                                    Dear {$user->firstname} {$user->lastname},
+                                </h2>
+                                <p style='color: #4a5568; font-size: 16px; line-height: 1.6; margin: 0;'>
+                                    We are pleased to confirm that your job application has been successfully received and is now under review.
+                                </p>
+                            </div>
+                            
+                            <!-- Application Details Card -->
+                            <div style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 15px; padding: 25px; margin: 30px 0; box-shadow: 0 8px 25px rgba(240, 147, 251, 0.3);'>
+                                <h3 style='color: #ffffff; margin: 0 0 20px 0; font-size: 20px; text-align: center;'>
+                                    📋 Application Summary
+                                </h3>
+                                <div style='background: rgba(255,255,255,0.9); border-radius: 10px; padding: 20px;'>
+                                    <table style='width: 100%; border-collapse: collapse;'>
+                                        <tr>
+                                            <td style='padding: 8px 0; font-weight: bold; color: #2d3748; width: 40%;'>Application ID:</td>
+                                            <td style='padding: 8px 0; color: #4a5568; font-family: monospace; font-size: 16px; background: #f7fafc; padding: 5px 10px; border-radius: 5px;'>{$applicationId}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style='padding: 8px 0; font-weight: bold; color: #2d3748;'>Position:</td>
+                                            <td style='padding: 8px 0; color: #4a5568;'>{$job->job_title_department}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style='padding: 8px 0; font-weight: bold; color: #2d3748;'>Category:</td>
+                                            <td style='padding: 8px 0; color: #4a5568;'>{$job->category}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style='padding: 8px 0; font-weight: bold; color: #2d3748;'>Pay Scale:</td>
+                                            <td style='padding: 8px 0; color: #4a5568;'>{$job->pay_scale}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style='padding: 8px 0; font-weight: bold; color: #2d3748;'>Application Date:</td>
+                                            <td style='padding: 8px 0; color: #4a5568;'>" . now()->format('F j, Y \a\t g:i A') . "</td>
+                                        </tr>
+                                        <tr>
+                                            <td style='padding: 8px 0; font-weight: bold; color: #2d3748;'>Status:</td>
+                                            <td style='padding: 8px 0;'>
+                                                <span style='background: #48bb78; color: white; padding: 4px 12px; border-radius: 20px; font-size: 14px; font-weight: bold;'>
+                                                    ✓ Received
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div>
+                            
+                            <!-- Next Steps -->
+                            <div style='background: #f7fafc; border-left: 4px solid #4299e1; padding: 20px; margin: 30px 0; border-radius: 0 8px 8px 0;'>
+                                <h4 style='color: #2d3748; margin: 0 0 15px 0; font-size: 18px;'>
+                                    📌 What's Next?
+                                </h4>
+                                <ol style='color: #4a5568; line-height: 1.8; margin: 0; padding-left: 20px;'>
+                                    <li>Complete all required sections of your application</li>
+                                    <li>Upload all mandatory documents</li>
+                                    <li>Review your application summary carefully</li>
+                                    <li>Process the application fee payment</li>
+                                    <li>Print your final application form</li>
+                                </ol>
+                            </div>
+                            
+                            <!-- Application Deadline -->
+                            " . ($job->application_end_date ? "
+                            <div style='background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 20px; margin: 30px 0;'>
+                                <h4 style='color: #b45309; margin: 0 0 10px 0; font-size: 16px;'>
+                                    ⏰ Important Deadline
+                                </h4>
+                                <p style='color: #92400e; margin: 0; font-size: 14px; line-height: 1.5;'>
+                                    <strong>Application Deadline:</strong> " . date('F j, Y', strtotime($job->application_end_date)) . "
+                                </p>
+                            </div>
+                            " : "") . "
+                            
+                            <!-- Important Notice -->
+                            <div style='background: #fed7d7; border: 1px solid #feb2b2; border-radius: 8px; padding: 20px; margin: 30px 0;'>
+                                <h4 style='color: #c53030; margin: 0 0 10px 0; font-size: 16px;'>
+                                    ⚠️ Important Notice
+                                </h4>
+                                <p style='color: #742a2a; margin: 0; font-size: 14px; line-height: 1.5;'>
+                                    Please quote your <strong>Application ID</strong> in all future correspondence. 
+                                    Keep this information confidential and do not share with unauthorized persons.
+                                </p>
+                            </div>
+                            
+                            <!-- Contact Information -->
+                            <div style='text-align: center; margin-top: 40px;'>
+                                <p style='color: #718096; font-size: 14px; margin: 0 0 10px 0;'>
+                                    Need assistance? Contact us at:
+                                </p>
+                                <p style='color: #4a5568; font-weight: bold; margin: 0;'>
+                                    📧 " . config('mail.from.address') . "
+                                </p>
+                            </div>
+                        </div>
+                        
+                        <!-- Footer -->
+                        <div style='background: #2d3748; padding: 30px; text-align: center;'>
+                            <p style='color: #a0aec0; margin: 0 0 10px 0; font-size: 16px; font-weight: 600;'>
+                                Thank you for your interest in Tura Municipal Board
+                            </p>
+                            <p style='color: #718096; margin: 0; font-size: 13px;'>
+                                This is an automated message. Please do not reply directly to this email.
+                            </p>
+                            <div style='margin-top: 20px; padding-top: 20px; border-top: 1px solid #4a5568;'>
+                                <p style='color: #718096; margin: 0; font-size: 12px;'>
+                                    © " . date('Y') . " Tura Municipal Board, Government of Meghalaya. All rights reserved.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </body>
+                </html>
+            ";
+
+            // Attempt to send the email
+            if (!$mail->send()) {
+                throw new \Exception('Email not sent. Error: ' . $mail->ErrorInfo);
+            }
+
+            Log::info('Job application email sent successfully', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'application_id' => $applicationId,
+                'job_id' => $job->id
+            ]);
+
+            return true;
+
+        } catch (\Exception $e) {
+            Log::error('Job application email sending failed', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'application_id' => $applicationId,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Send payment confirmation email
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function sendPaymentConfirmationEmail(Request $request)
+    {
+        try {
+            // Get authenticated user from JWT middleware
+            $authenticatedUser = $request->input('authenticated_user');
+            $userId = $authenticatedUser->id;
+
+            $validator = Validator::make($request->all(), [
+                'job_id' => 'required|integer|exists:tura_job_postings,id',
+                'payment_amount' => 'required|numeric|min:0',
+                'payment_reference' => 'nullable|string|max:100',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 400);
+            }
+
+            $jobId = $request->job_id;
+            $paymentAmount = $request->payment_amount;
+            $paymentReference = $request->payment_reference;
+
+            // Find the job application
+            $jobApplication = JobAppliedStatus::where([
+                'user_id' => $userId,
+                'job_id' => $jobId
+            ])->first();
+
+            if (!$jobApplication) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Job application not found.'
+                ], 404);
+            }
+
+            // Check if payment confirmation email already sent
+            if ($jobApplication->isPaymentConfirmationEmailSent()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Payment confirmation email was already sent',
+                    'data' => [
+                        'application_id' => $jobApplication->application_id,
+                        'payment_confirmation_email_sent' => true,
+                        'message' => 'Email was already sent for this payment.'
+                    ]
+                ], 200);
+            }
+
+            // Get job details
+            $job = TuraJobPosting::find($jobId);
+            if (!$job) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Job not found'
+                ], 404);
+            }
+
+            // Send payment confirmation email
+            try {
+                $this->sendPaymentConfirmationEmailContent($authenticatedUser, $job, $jobApplication->application_id, $paymentAmount, $paymentReference);
+                $jobApplication->markPaymentConfirmationEmailSent();
+                $emailSent = true;
+                $emailMessage = 'Payment confirmation email sent successfully';
+            } catch (\Exception $e) {
+                Log::error('Error sending payment confirmation email: ' . $e->getMessage());
+                $emailSent = false;
+                $emailMessage = 'Email sending failed: ' . $e->getMessage();
+            }
+
+            return response()->json([
+                'success' => $emailSent,
+                'message' => $emailMessage,
+                'data' => [
+                    'application_id' => $jobApplication->application_id,
+                    'payment_confirmation_email_sent' => $jobApplication->payment_confirmation_email_sent,
+                    'email_sent_now' => $emailSent,
+                    'payment_amount' => $paymentAmount,
+                    'payment_reference' => $paymentReference
+                ]
+            ], $emailSent ? 200 : 500);
+
+        } catch (\Exception $e) {
+            Log::error('Error sending payment confirmation email: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error sending payment confirmation email',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Send payment confirmation email content
+     *
+     * @param User $user
+     * @param TuraJobPosting $job
+     * @param string $applicationId
+     * @param float $paymentAmount
+     * @param string $paymentReference
+     * @return bool
+     */
+    private function sendPaymentConfirmationEmailContent($user, $job, $applicationId, $paymentAmount, $paymentReference = null)
+    {
+        // Initialize PHPMailer
+        $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+
+        try {
+            // Server settings
+            $mail->SMTPDebug = 0; // Disable debug output
+            $mail->isSMTP(); // Set mailer to use SMTP
+            $mail->Host = config('mail.mailers.smtp.host'); // SMTP server
+            $mail->SMTPAuth = true; // Enable SMTP authentication
+            $mail->Username = config('mail.mailers.smtp.username'); // SMTP username
+            $mail->Password = config('mail.mailers.smtp.password'); // SMTP password
+            $mail->SMTPSecure = config('mail.mailers.smtp.encryption'); // Encryption type (tls/ssl)
+            $mail->Port = config('mail.mailers.smtp.port'); // SMTP port
+
+            // Sender and recipient
+            $mail->setFrom(config('mail.from.address'), config('mail.from.name'));
+            $mail->addAddress($user->email); // Add recipient email
+            
+            // Subject
+            $mail->Subject = 'Payment Confirmation - Application ID: ' . $applicationId;
+
+            // Email content
+            $mail->isHTML(true); // Set email format to HTML
+            
+            // HTML body content - Creative Payment Confirmation Template
+            $mail->Body = "
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset='utf-8'>
+                    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+                    <title>Payment Confirmation</title>
+                </head>
+                <body style='margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f0f8ff;'>
+                    <div style='max-width: 650px; margin: 0 auto; background-color: #ffffff;'>
+                        <!-- Header -->
+                        <div style='background: linear-gradient(135deg, #4ade80 0%, #22c55e 50%, #16a34a 100%); padding: 40px 30px; text-align: center; position: relative;'>
+                            <div style='position: absolute; top: 20px; right: 30px; background: rgba(255,255,255,0.2); padding: 8px 16px; border-radius: 20px;'>
+                                <span style='color: #ffffff; font-size: 14px; font-weight: bold;'>✅ PAID</span>
+                            </div>
+                            <h1 style='color: #ffffff; margin: 0; font-size: 32px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.2);'>
+                                🏛️ Tura Municipal Board
+                            </h1>
+                            <p style='color: #dcfce7; margin: 10px 0 0 0; font-size: 16px; font-weight: 300;'>
+                                Government of Meghalaya
+                            </p>
+                            <div style='margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 10px; backdrop-filter: blur(10px);'>
+                                <h2 style='color: #ffffff; margin: 0; font-size: 24px; font-weight: 600;'>
+                                    💳 Payment Confirmation
+                                </h2>
+                            </div>
+                        </div>
+                        
+                        <!-- Success Message -->
+                        <div style='padding: 30px 30px 20px 30px;'>
+                            <div style='text-align: center; margin-bottom: 30px;'>
+                                <div style='display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 20px; border-radius: 50%; margin-bottom: 20px; box-shadow: 0 8px 25px rgba(16, 185, 129, 0.3);'>
+                                    <span style='color: #ffffff; font-size: 32px;'>✓</span>
+                                </div>
+                                <h2 style='color: #065f46; margin: 0 0 10px 0; font-size: 28px; font-weight: bold;'>
+                                    Payment Successful!
+                                </h2>
+                                <p style='color: #047857; font-size: 18px; margin: 0; font-weight: 600;'>
+                                    ₹{$paymentAmount} received successfully
+                                </p>
+                            </div>
+                            
+                            <!-- Greeting -->
+                            <div style='margin-bottom: 30px;'>
+                                <h3 style='color: #1f2937; margin: 0 0 15px 0; font-size: 22px;'>
+                                    Dear {$user->firstname} {$user->lastname},
+                                </h3>
+                                <p style='color: #4b5563; font-size: 16px; line-height: 1.6; margin: 0;'>
+                                    Your payment has been processed successfully. Your application is now complete and ready for review.
+                                </p>
+                            </div>
+                            
+                            <!-- Payment Receipt Card -->
+                            <div style='background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%); border-radius: 15px; padding: 25px; margin: 30px 0; box-shadow: 0 8px 25px rgba(167, 139, 250, 0.3);'>
+                                <h3 style='color: #ffffff; margin: 0 0 20px 0; font-size: 20px; text-align: center;'>
+                                    🧾 Payment Receipt
+                                </h3>
+                                <div style='background: rgba(255,255,255,0.95); border-radius: 10px; padding: 20px;'>
+                                    <table style='width: 100%; border-collapse: collapse;'>
+                                        <tr>
+                                            <td style='padding: 10px 0; font-weight: bold; color: #1f2937; width: 40%; border-bottom: 1px solid #e5e7eb;'>Application ID:</td>
+                                            <td style='padding: 10px 0; color: #374151; font-family: monospace; font-size: 16px; border-bottom: 1px solid #e5e7eb;'>{$applicationId}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style='padding: 10px 0; font-weight: bold; color: #1f2937; border-bottom: 1px solid #e5e7eb;'>Position Applied:</td>
+                                            <td style='padding: 10px 0; color: #374151; border-bottom: 1px solid #e5e7eb;'>{$job->job_title_department}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style='padding: 10px 0; font-weight: bold; color: #1f2937; border-bottom: 1px solid #e5e7eb;'>Category:</td>
+                                            <td style='padding: 10px 0; color: #374151; border-bottom: 1px solid #e5e7eb;'>{$job->category}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style='padding: 10px 0; font-weight: bold; color: #1f2937; border-bottom: 1px solid #e5e7eb;'>Payment Amount:</td>
+                                            <td style='padding: 10px 0; color: #065f46; font-weight: bold; font-size: 18px; border-bottom: 1px solid #e5e7eb;'>₹{$paymentAmount}</td>
+                                        </tr>
+                                        " . ($paymentReference ? "
+                                        <tr>
+                                            <td style='padding: 10px 0; font-weight: bold; color: #1f2937; border-bottom: 1px solid #e5e7eb;'>Payment Reference:</td>
+                                            <td style='padding: 10px 0; color: #374151; font-family: monospace; border-bottom: 1px solid #e5e7eb;'>{$paymentReference}</td>
+                                        </tr>
+                                        " : "") . "
+                                        <tr>
+                                            <td style='padding: 10px 0; font-weight: bold; color: #1f2937;'>Payment Date:</td>
+                                            <td style='padding: 10px 0; color: #374151;'>" . now()->format('F j, Y \a\t g:i A') . "</td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div>
+                            
+                            <!-- What's Next Section -->
+                            <div style='background: #ecfdf5; border-left: 4px solid #10b981; padding: 20px; margin: 30px 0; border-radius: 0 8px 8px 0;'>
+                                <h4 style='color: #065f46; margin: 0 0 15px 0; font-size: 18px;'>
+                                    🎯 What Happens Next?
+                                </h4>
+                                <ul style='color: #047857; line-height: 1.8; margin: 0; padding-left: 20px;'>
+                                    <li><strong>Application Review:</strong> Your complete application is now under review</li>
+                                    <li><strong>Print Form:</strong> You can now download and print your final application form</li>
+                                    <li><strong>Status Updates:</strong> Check your email regularly for application status updates</li>
+                                    <li><strong>Selection Process:</strong> Wait for further communication regarding the selection process</li>
+                                </ul>
+                            </div>
+                            
+                            <!-- Important Information -->
+                            <div style='background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 20px; margin: 30px 0;'>
+                                <h4 style='color: #92400e; margin: 0 0 15px 0; font-size: 16px;'>
+                                    📋 Important Information
+                                </h4>
+                                <ul style='color: #78350f; line-height: 1.6; margin: 0; padding-left: 20px; font-size: 14px;'>
+                                    <li><strong>Keep this email</strong> as proof of payment for your records</li>
+                                    <li><strong>Payment is non-refundable</strong> as per terms and conditions</li>
+                                    <li><strong>Quote your Application ID</strong> in all future correspondence</li>
+                                    <li><strong>Contact support</strong> if you have any questions about your application</li>
+                                </ul>
+                            </div>
+                            
+                            <!-- Contact Section -->
+                            <div style='text-align: center; margin-top: 40px;'>
+                                <div style='background: #f3f4f6; padding: 20px; border-radius: 10px;'>
+                                    <p style='color: #6b7280; font-size: 14px; margin: 0 0 10px 0;'>
+                                        Questions about your application?
+                                    </p>
+                                    <p style='color: #374151; font-weight: bold; margin: 0; font-size: 16px;'>
+                                        📧 " . config('mail.from.address') . "
+                                    </p>
+                                    <p style='color: #6b7280; font-size: 12px; margin: 10px 0 0 0;'>
+                                        Please include your Application ID when contacting us
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Footer -->
+                        <div style='background: #1f2937; padding: 30px; text-align: center;'>
+                            <p style='color: #9ca3af; margin: 0 0 10px 0; font-size: 16px; font-weight: 600;'>
+                                🙏 Thank you for choosing Tura Municipal Board
+                            </p>
+                            <p style='color: #6b7280; margin: 0; font-size: 13px;'>
+                                This is an automated payment confirmation. Please do not reply to this email.
+                            </p>
+                            <div style='margin-top: 20px; padding-top: 20px; border-top: 1px solid #374151;'>
+                                <p style='color: #6b7280; margin: 0; font-size: 12px;'>
+                                    © " . date('Y') . " Tura Municipal Board, Government of Meghalaya. All rights reserved.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </body>
+                </html>
+            ";
+
+            // Attempt to send the email
+            if (!$mail->send()) {
+                throw new \Exception('Email not sent. Error: ' . $mail->ErrorInfo);
+            }
+
+            Log::info('Payment confirmation email sent successfully', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'application_id' => $applicationId,
+                'job_id' => $job->id,
+                'payment_amount' => $paymentAmount
+            ]);
+
+            return true;
+
+        } catch (\Exception $e) {
+            Log::error('Payment confirmation email sending failed', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'application_id' => $applicationId,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
         }
     }
 
@@ -3172,7 +4614,7 @@ class JobController extends Controller
             $paymentDetails = $this->calculateApplicationFee($existingData['personal_details'], $existingData['selected_job']);
 
             // Generate application number
-            $applicationNumber = 'TURA-' . $jobId . '-' . $userId . '-' . date('Y');
+            $applicationNumber = 'Tura-' . $jobId . '-' . $userId . '-' . date('Y');
 
             // Update stage to print_application (final stage)
             if ($applicationStatus->stage < JobAppliedStatus::STAGES['print_application']) {

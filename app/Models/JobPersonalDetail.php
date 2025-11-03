@@ -56,6 +56,7 @@ class JobPersonalDetail extends Model
         'present_pincode',
         'user_id',
         'job_id',
+        'email',
         'inserted_at',
         'updated_at',
     ];

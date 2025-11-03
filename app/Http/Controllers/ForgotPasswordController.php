@@ -133,7 +133,7 @@ class ForgotPasswordController extends Controller
             $mail->addAddress($email); // Add recipient email
             
             // Subject
-            $mail->Subject = 'Password Reset - TURA Municiple Board'; // Set the subject line
+            $mail->Subject = 'Password Reset - Tura Municiple Board'; // Set the subject line
 
             // Email content
             $mail->isHTML(true); // Set email format to HTML

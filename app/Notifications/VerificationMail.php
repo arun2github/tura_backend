@@ -44,11 +44,26 @@ class VerificationMail extends Notification implements ShouldQueue
     public function toMail($notifiable)
     {
         $url = "/api/verifyemail/".$this->token;
+        
         return (new MailMessage)
-            ->line('Welcome to FundooNotes')
-            ->line('Please Verify your email to get started with us')
-            ->action('Verification of Email', url($url))
-            ->line('Thank you for Registeration!');
+            ->from(config('mail.from.address'), 'Tura Municipal Board')
+            ->subject('Welcome to Tura Municipal Board - Verify Your Email')
+            ->greeting('Welcome to Tura Municipal Board!')
+            ->line('Dear ' . ($notifiable->firstname ?? 'User') . ',')
+            ->line('Thank you for registering with Tura Municipal Board. We are excited to have you join our community.')
+            ->line('To get started and access all our services, please verify your email address by clicking the button below:')
+            ->action('Verify Email Address', url($url))
+            ->line('**Why verify your email?**')
+            ->line('• Access to job application portal')
+            ->line('• Receive important notifications and updates')
+            ->line('• Secure your account')
+            ->line('• Complete your job applications')
+            ->line('If you did not create this account, please ignore this email.')
+            ->line('**Need help?** Contact us at ' . config('mail.from.address'))
+            ->line('Thank you for choosing Tura Municipal Board!')
+            ->salutation('Best regards,  
+Tura Municipal Board  
+Government of Meghalaya');
     }
 
     /**

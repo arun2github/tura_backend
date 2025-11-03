@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Email Configuration Test - Tura Municipal Board</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007cba;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #005a87;
+        }
+        .response {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 15px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        .success {
+            background: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        .warning {
+            background: #fff3cd;
+            border-color: #ffeaa7;
+            color: #856404;
+        }
+        .info {
+            background: #d1ecf1;
+            border-color: #bee5eb;
+            color: #0c5460;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #007cba;
+            padding-bottom: 10px;
+        }
+        .step {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border-left: 4px solid #007cba;
+        }
+        .step h4 {
+            margin-top: 0;
+            color: #007cba;
+        }
+        .config-info {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📧 Email Configuration Test</h1>
+        <p>Test the email functionality for Tura Municipal Board registration system.</p>
+        
+        <div class="step">
+            <h4>🔧 Current Email Configuration</h4>
+            <div class="config-info">
+                MAIL_HOST: smtp.gmail.com<br>
+                MAIL_PORT: 587<br>
+                MAIL_USERNAME: turamunicipalboard24@gmail.com<br>
+                MAIL_ENCRYPTION: tls<br>
+                MAIL_FROM_ADDRESS: turamunicipalboard24@gmail.com<br>
+                MAIL_FROM_NAME: Tura Municipal Board
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>📮 Test Email Sending</h2>
+        
+        <div class="form-group">
+            <label>Test Email Address</label>
+            <input type="email" id="testEmail" placeholder="Enter email address to test" value="test@gmail.com">
+        </div>
+        
+        <button onclick="testEmailSending()">📧 Send Test Email</button>
+        <button onclick="testRegistration()">👤 Test Full Registration</button>
+        <button onclick="manualVerifyEmail()">✅ Manual Email Verification</button>
+        
+        <div id="emailTestResult" class="response" style="display: none;"></div>
+    </div>
+
+    <div class="container">
+        <h2>🧪 Registration Test</h2>
+        <p>Test the complete registration flow including email verification</p>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <div class="form-group">
+                <label>First Name</label>
+                <input type="text" id="firstName" value="Test">
+            </div>
+            <div class="form-group">
+                <label>Last Name</label>
+                <input type="text" id="lastName" value="User">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="regEmail" value="testuser@example.com">
+            </div>
+            <div class="form-group">
+                <label>Phone</label>
+                <input type="text" id="phone" value="1234567890">
+            </div>
+            <div class="form-group">
+                <label>Ward ID</label>
+                <input type="number" id="wardId" value="1">
+            </div>
+            <div class="form-group">
+                <label>Locality</label>
+                <input type="text" id="locality" value="Test Locality">
+            </div>
+            <div class="form-group">
+                <label>Date of Birth</label>
+                <input type="date" id="dob" value="1990-01-01">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="password" value="password123">
+            </div>
+        </div>
+        
+        <button onclick="testFullRegistration()">🚀 Test Complete Registration</button>
+        
+        <div id="registrationResult" class="response" style="display: none;"></div>
+    </div>
+
+    <div class="container">
+        <h2>🔍 Email Troubleshooting</h2>
+        
+        <div class="step">
+            <h4>📋 Troubleshooting Steps</h4>
+            <ol>
+                <li><strong>Check Gmail Settings:</strong> Ensure 2-factor authentication is enabled</li>
+                <li><strong>App Password:</strong> Use app-specific password, not regular Gmail password</li>
+                <li><strong>Less Secure Apps:</strong> May need to be enabled (if not using app password)</li>
+                <li><strong>Firewall/Network:</strong> Check if port 587 is blocked</li>
+                <li><strong>Logs:</strong> Check Laravel logs for detailed error messages</li>
+            </ol>
+        </div>
+        
+        <button onclick="checkEmailConfig()">⚙️ Check Email Configuration</button>
+        <button onclick="testSMTPConnection()">🔗 Test SMTP Connection</button>
+        
+        <div id="troubleshootResult" class="response" style="display: none;"></div>
+    </div>
+
+    <script>
+        const BASE_URL = 'http://127.0.0.1:8000/api';
+
+        async function testEmailSending() {
+            try {
+                showResult('emailTestResult', '⏳ Testing email sending...', 'info');
+                
+                const email = document.getElementById('testEmail').value;
+                if (!email) {
+                    showResult('emailTestResult', '❌ Please enter a test email address', 'error');
+                    return;
+                }
+                
+                const response = await fetch(`${BASE_URL}/testEmail`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: email
+                    })
+                });
+
+                const result = await response.json();
+                
+                const statusClass = response.ok ? 'success' : 'error';
+                showResult('emailTestResult', 
+                    `${response.ok ? '✅' : '❌'} EMAIL TEST (Status: ${response.status})
+
+EMAIL: ${email}
+
+RESPONSE:
+${JSON.stringify(result, null, 2)}
+
+${response.ok ? '📧 Check your email inbox!' : ''}`, statusClass);
+
+            } catch (error) {
+                showResult('emailTestResult', `❌ NETWORK ERROR: ${error.message}`, 'error');
+            }
+        }
+
+        async function testFullRegistration() {
+            try {
+                showResult('registrationResult', '⏳ Testing full registration...', 'info');
+                
+                const registrationData = {
+                    firstname: document.getElementById('firstName').value,
+                    lastname: document.getElementById('lastName').value,
+                    email: document.getElementById('regEmail').value,
+                    phone_no: document.getElementById('phone').value,
+                    ward_id: document.getElementById('wardId').value,
+                    locality: document.getElementById('locality').value,
+                    dob: document.getElementById('dob').value,
+                    password: document.getElementById('password').value,
+                    confirm_password: document.getElementById('password').value
+                };
+                
+                const response = await fetch(`${BASE_URL}/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(registrationData)
+                });
+
+                const result = await response.json();
+                
+                const statusClass = response.ok ? (result.status === 'warning' ? 'warning' : 'success') : 'error';
+                showResult('registrationResult', 
+                    `${response.ok ? '✅' : '❌'} REGISTRATION TEST (Status: ${response.status})
+
+REQUEST:
+${JSON.stringify(registrationData, null, 2)}
+
+RESPONSE:
+${JSON.stringify(result, null, 2)}
+
+${result.email_sent ? '📧 Verification email sent successfully!' : '⚠️ Email sending failed - ' + (result.email_error || 'Unknown error')}
+
+${!result.email_sent ? '🔧 Use "Manual Email Verification" button to verify this account manually.' : ''}`, statusClass);
+
+            } catch (error) {
+                showResult('registrationResult', `❌ NETWORK ERROR: ${error.message}`, 'error');
+            }
+        }
+
+        async function manualVerifyEmail() {
+            try {
+                showResult('emailTestResult', '⏳ Manually verifying email...', 'info');
+                
+                const email = document.getElementById('regEmail').value;
+                if (!email) {
+                    showResult('emailTestResult', '❌ Please enter an email address to verify', 'error');
+                    return;
+                }
+                
+                const response = await fetch(`${BASE_URL}/manualVerifyEmail`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: email
+                    })
+                });
+
+                const result = await response.json();
+                
+                const statusClass = response.ok ? 'success' : 'error';
+                showResult('emailTestResult', 
+                    `${response.ok ? '✅' : '❌'} MANUAL VERIFICATION (Status: ${response.status})
+
+EMAIL: ${email}
+
+RESPONSE:
+${JSON.stringify(result, null, 2)}
+
+${response.ok ? '🎉 Email verified successfully! User can now login.' : ''}`, statusClass);
+
+            } catch (error) {
+                showResult('emailTestResult', `❌ NETWORK ERROR: ${error.message}`, 'error');
+            }
+        }
+
+        async function checkEmailConfig() {
+            showResult('troubleshootResult', 
+                `📧 EMAIL CONFIGURATION CHECK
+
+Current Configuration:
+- SMTP Host: smtp.gmail.com
+- SMTP Port: 587
+- Username: turamunicipalboard24@gmail.com
+- Encryption: TLS
+- From Address: turamunicipalboard24@gmail.com
+- From Name: Tura Municipal Board
+
+✅ Configuration appears correct for Gmail SMTP
+
+⚠️ IMPORTANT CHECKS:
+1. Gmail account has 2-factor authentication enabled
+2. App password is being used (not regular password)
+3. Account is not locked or restricted
+4. Network allows outbound SMTP connections
+
+🔧 If emails still fail:
+- Check Laravel logs: storage/logs/laravel.log
+- Verify app password is correct
+- Test with different email provider`, 'info');
+        }
+
+        async function testSMTPConnection() {
+            showResult('troubleshootResult', 
+                `🔗 SMTP CONNECTION TEST
+
+To manually test SMTP connection:
+
+1. Use telnet or openssl to test:
+   openssl s_client -connect smtp.gmail.com:587 -starttls smtp
+
+2. Expected response should include:
+   220 smtp.gmail.com ESMTP
+
+3. If connection fails:
+   - Check firewall settings
+   - Verify internet connectivity
+   - Try different SMTP server (smtp.googlemail.com)
+
+4. Check Laravel logs for specific SMTP errors:
+   tail -f storage/logs/laravel.log
+
+🛠️ Common SMTP Issues:
+- Authentication failure: Wrong app password
+- Connection timeout: Network/firewall blocking
+- TLS/SSL errors: Incorrect encryption settings`, 'warning');
+        }
+
+        function showResult(elementId, message, type = 'info') {
+            const resultDiv = document.getElementById(elementId);
+            resultDiv.textContent = message;
+            resultDiv.style.display = 'block';
+            resultDiv.className = `response ${type}`;
+        }
+
+        // Auto-populate with current timestamp for unique tests
+        window.onload = function() {
+            const timestamp = new Date().getTime();
+            document.getElementById('regEmail').value = `test${timestamp}@example.com`;
+        };
+    </script>
+</body>
+</html>

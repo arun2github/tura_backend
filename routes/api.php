@@ -35,6 +35,8 @@ Route::group(['middleware' => 'api'], function() {
     Route::post('changePassword', [UserController::class, 'changePassword']);
     
     Route::get('/verifyEmail/{token}', [UserController::class, 'verifyEmail']);
+    Route::post('testEmail', [UserController::class, 'testEmail']); // Test email functionality
+    Route::post('manualVerifyEmail', [UserController::class, 'manualVerifyEmail']); // Manual email verification for admin
     
     Route::post('forgotpassword', [ForgotPasswordController::class, 'forgotPassword']);
     // Display the password reset form
@@ -74,6 +76,7 @@ Route::group(['middleware' => 'api'], function() {
     Route::middleware('auth')->group(function () {
         Route::get('jobs', [JobController::class, 'getJobs']);
         Route::post('getApplicationProgress', [JobController::class, 'getApplicationProgress']);
+        Route::post('saveSelectedJobs', [JobController::class, 'saveSelectedJobs']);
         Route::post('savePersonalDetails', [JobController::class, 'savePersonalDetails']);
         Route::post('saveEmploymentDetails', [JobController::class, 'saveEmploymentDetails']);
         Route::post('getEmploymentDetails', [JobController::class, 'getEmploymentDetails']);
@@ -102,6 +105,10 @@ Route::group(['middleware' => 'api'], function() {
         Route::get('getAvailableJobs', [JobController::class, 'getAvailableJobs']);
         Route::post('saveSelectedJob', [JobController::class, 'saveSelectedJob']);
         Route::get('getSelectedJobs', [JobController::class, 'getSelectedJobs']);
+        
+        // Application ID Generation and Email
+        Route::post('generateApplicationIdAndSendEmail', [JobController::class, 'generateApplicationIdAndSendEmail']);
+        Route::post('sendPaymentConfirmationEmail', [JobController::class, 'sendPaymentConfirmationEmail']);
     });
 });
 Route::post('command', [UserController::class, 'commandRun']);

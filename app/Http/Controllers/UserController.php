@@ -131,17 +131,44 @@ class UserController extends Controller
             $userDetail = $userObject->saveUserDetails($userArray);
 
             $token = JWTAuth::fromUser($userDetail);
+            $emailSent = false;
+            $emailError = null;
+            
             if($userDetail) {
-                $this->sendMail($token,$request->email);
+                try {
+                    $emailSent = $this->sendMail($token, $request->email);
+                } catch (\Exception $e) {
+                    $emailError = $e->getMessage();
+                    Log::error('Registration email failed during registration', [
+                        'user_id' => $userDetail->id,
+                        'email' => $request->email,
+                        'error' => $emailError
+                    ]);
+                }
             }
 
-            Log::channel('customLog')->info('Registered user Email : ' . 'Email Id :' . $request->email);
-            Log::info('Registered user Email : ' . 'Email Id :' . $request->email);
+            Log::info('Registered user Email : ' . 'Email Id :' . $request->email . ' Email Sent: ' . ($emailSent ? 'Yes' : 'No'));
+
+            $responseMessage = 'User Successfully Registered';
+            $statusCode = 201;
+            
+            if (!$emailSent && $emailError) {
+                $responseMessage = 'User Registered Successfully, but verification email could not be sent. Please contact support to verify your account.';
+                Log::warning('User registered but email failed', [
+                    'user_id' => $userDetail->id,
+                    'email' => $request->email,
+                    'error' => $emailError
+                ]);
+            }
 
             return response()->json([
-                'status' => 'success',
-                'message' => 'User Successfully Registered',
-            ], 201);
+                'status' => $emailSent ? 'success' : 'warning',
+                'message' => $responseMessage,
+                'user_id' => $userDetail->id,
+                'email_sent' => $emailSent,
+                'verification_required' => true,
+                'email_error' => $emailSent ? null : 'SMTP Authentication Failed - Contact Administrator'
+            ], $statusCode);
 
         } catch (MunicipalBoardException $exception) {
             Log::error('Invalid User');
@@ -279,7 +306,7 @@ class UserController extends Controller
             $userDetails->phone_no = $request->phone_no;
             $userDetails->save();
 
-            Log::channel('customLog')->info('Registered user Email : ' . 'Email Id :' . $request->email);
+            Log::info('Profile updated for user Email : ' . 'Email Id :' . $request->email);
 
             return response()->json([
                 'status' => 'success',
@@ -363,6 +390,11 @@ class UserController extends Controller
     }
 
     public function sendMail($token,$email){
+        Log::info('Starting email sending process', [
+            'email' => $email,
+            'token_length' => strlen($token)
+        ]);
+        
         $url = url("/api/verifyEmail/" . $token);
         // Initialize PHPMailer
         $mail = new PHPMailer(true);
@@ -377,38 +409,344 @@ class UserController extends Controller
             $mail->Password = config('mail.mailers.smtp.password'); // SMTP password
             $mail->SMTPSecure = config('mail.mailers.smtp.encryption'); // Encryption type (tls/ssl)
             $mail->Port = config('mail.mailers.smtp.port'); // SMTP port
+            
+            Log::info('SMTP Configuration loaded', [
+                'host' => config('mail.mailers.smtp.host'),
+                'port' => config('mail.mailers.smtp.port'),
+                'username' => config('mail.mailers.smtp.username'),
+                'encryption' => config('mail.mailers.smtp.encryption')
+            ]);
 
             // Sender and recipient
             $mail->setFrom(config('mail.from.address'), config('mail.from.name'));
             $mail->addAddress($email); // Add recipient email
             
             // Subject
-            $mail->Subject = 'Email Verification - TURA Municiple Board'; // Set the subject line
-
-            // Email content
+            $mail->Subject = 'Account Verification Required - Tura Municipal Board | Government of Meghalaya'; // Set the subject line            // Email content
             $mail->isHTML(true); // Set email format to HTML
-            // HTML body content
+            // HTML body content - Professional Registration Template
             $mail->Body = "
-                <h3>Welcome to TURA Municipal Board.</h3>
-                <p>Please verify your email to get started with us by clicking the link below:</p>
-                <a href='{$url}'><strong>Verification of Email</strong></a>
-                <br><br>
-                <p>Thank you for registering!</p>
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset='utf-8'>
+                    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+                    <title>Email Verification</title>
+                </head>
+                <body style='margin: 0; padding: 0; font-family: \"Times New Roman\", Times, serif; background-color: #f8f9fa; line-height: 1.6;'>
+                    <div style='max-width: 700px; margin: 0 auto; background-color: #ffffff; border: 2px solid #1a365d; box-shadow: 0 4px 20px rgba(0,0,0,0.15);'>
+                        <!-- Official Header -->
+                        <div style='background: linear-gradient(135deg, #1a365d 0%, #2d5a87 100%); padding: 30px; text-align: center; position: relative;'>
+                            <!-- Government Emblem Pattern -->
+                            <div style='position: absolute; top: 10px; left: 20px; color: rgba(255,255,255,0.1); font-size: 40px;'>⚖️</div>
+                            <div style='position: absolute; top: 10px; right: 20px; color: rgba(255,255,255,0.1); font-size: 40px;'>🏛️</div>
+                            
+                            <!-- Logo -->
+                            <div style='margin-bottom: 15px;'>
+                                <img src='" . asset('images/email/logo.png') . "' alt='Tura Municipal Board Official Seal' style='max-width: 100px; height: auto; border: 3px solid #ffffff; border-radius: 50%; box-shadow: 0 6px 20px rgba(0,0,0,0.3);'>
+                            </div>
+                            
+                            <!-- Official Header Text -->
+                            <h1 style='color: #ffffff; margin: 0; font-size: 28px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.5); letter-spacing: 1px;'>
+                                Tura MUNICIPAL BOARD
+                            </h1>
+                            <div style='border-bottom: 2px solid #ffffff; width: 60%; margin: 10px auto;'></div>
+                            <p style='color: #e2e8f0; margin: 8px 0 5px 0; font-size: 16px; font-weight: 500;'>
+                                Government of Meghalaya
+                            </p>
+                            <p style='color: #cbd5e0; margin: 0; font-size: 14px; font-style: italic;'>
+                                Established: 12th September, 1979
+                            </p>
+                        </div>
+                        
+                        <!-- Official Notice Section -->
+                        <div style='padding: 35px 40px;'>
+                            <!-- Official Notice Header -->
+                            <div style='text-align: center; margin-bottom: 30px; border-bottom: 3px double #1a365d; padding-bottom: 20px;'>
+                                <div style='background: #1a365d; color: #ffffff; padding: 12px 25px; display: inline-block; border-radius: 25px; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(26, 54, 93, 0.3);'>
+                                    <span style='font-size: 20px; margin-right: 8px;'>📋</span>
+                                    <span style='font-weight: bold; font-size: 16px;'>OFFICIAL NOTICE</span>
+                                </div>
+                                <h2 style='color: #1a365d; margin: 0 0 8px 0; font-size: 24px; font-weight: bold;'>
+                                    ACCOUNT VERIFICATION REQUIRED
+                                </h2>
+                                <p style='color: #2d5a87; font-size: 16px; margin: 0; font-weight: 500;'>
+                                    Citizen Registration Portal - Email Confirmation
+                                </p>
+                            </div>                            <!-- Official Communication -->
+                            <div style='background: #f7fafc; border: 2px solid #e2e8f0; border-left: 6px solid #1a365d; padding: 30px; margin: 25px 0; border-radius: 8px;'>
+                                <!-- Official Reference -->
+                                <div style='text-align: right; margin-bottom: 20px; color: #718096; font-size: 12px; font-family: monospace;'>
+                                    <strong>Ref No:</strong> TMB/REG/" . date('Y') . "/" . strtoupper(substr(md5($email), 0, 6)) . "<br>
+                                    <strong>Date:</strong> " . date('d/m/Y') . "
+                                </div>
+                                
+                                <h3 style='color: #1a365d; margin: 0 0 20px 0; font-size: 16px; text-decoration: underline; font-weight: bold;'>
+                                    Subject: Email Verification for Digital Citizen Services Portal
+                                </h3>
+                                
+                                <p style='color: #2d3748; font-size: 15px; line-height: 1.7; margin: 0 0 18px 0;'>
+                                    <strong>Dear Respected Citizen,</strong>
+                                </p>
+                                
+                                <p style='color: #2d3748; font-size: 15px; line-height: 1.7; margin: 0 0 15px 0; text-align: justify;'>
+                                    Warm greetings from <strong>Tura Municipal Board, Government of Meghalaya</strong>. We hereby acknowledge the receipt of your application for registration in our Digital Citizen Services Portal.
+                                </p>
+                                
+                                <p style='color: #2d3748; font-size: 15px; line-height: 1.7; margin: 0 0 15px 0; text-align: justify;'>
+                                    As per the established protocols and in compliance with digital security guidelines issued by the Government of Meghalaya, email verification is mandatory for all citizen accounts.
+                                </p>
+                                
+                                <p style='color: #1a365d; font-size: 15px; line-height: 1.7; margin: 0; text-align: justify; font-weight: 500;'>
+                                    You are requested to complete the verification process by clicking on the official verification link provided below:
+                                </p>
+                            </div>
+                            
+                            <!-- Official Verification Button -->
+                            <div style='text-align: center; margin: 35px 0; padding: 25px; background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%); border-radius: 10px; border: 2px dashed #1a365d;'>
+                                <p style='color: #1a365d; font-size: 14px; margin: 0 0 15px 0; font-weight: bold;'>
+                                    ⚠️ OFFICIAL VERIFICATION REQUIRED
+                                </p>
+                                <a href='{$url}' style='display: inline-block; background: linear-gradient(135deg, #1a365d 0%, #2d5a87 100%); color: #ffffff; text-decoration: none; padding: 18px 40px; border-radius: 6px; font-weight: bold; font-size: 16px; box-shadow: 0 6px 20px rgba(26, 54, 93, 0.4); border: 2px solid #ffffff; text-transform: uppercase; letter-spacing: 0.5px;'>
+                                    🏛️ VERIFY CITIZEN ACCOUNT
+                                </a>
+                                <p style='color: #718096; font-size: 12px; margin: 15px 0 0 0; font-style: italic;'>
+                                    Click the above button to verify your account officially
+                                </p>
+                            </div>
+                            
+                            <!-- Benefits Section -->
+                            <div style='background: #f0fff4; border: 2px solid #68d391; border-radius: 8px; padding: 25px; margin: 30px 0;'>
+                                <h4 style='color: #065f46; margin: 0 0 15px 0; font-size: 18px;'>
+                                    �️ Municipal Services Available After Verification:
+                                </h4>
+                                <ul style='color: #047857; line-height: 1.8; margin: 0; padding-left: 20px;'>
+                                    <li><strong>Government Job Applications:</strong> Apply for municipal positions and government jobs</li>
+                                    <li><strong>Application Status Tracking:</strong> Monitor your application progress in real-time</li>
+                                    <li><strong>Official Notifications:</strong> Receive important municipal announcements and updates</li>
+                                    <li><strong>Document Management:</strong> Secure access to upload and manage official documents</li>
+                                    <li><strong>Municipal Services:</strong> Access various civic and administrative services</li>
+                                </ul>
+                            </div>
+                            
+                            <!-- Official Security Notice -->
+                            <div style='background: #fff8dc; border: 2px solid #d69e2e; border-radius: 8px; padding: 25px; margin: 30px 0; border-left: 6px solid #d69e2e;'>
+                                <h4 style='color: #744210; margin: 0 0 12px 0; font-size: 16px; font-weight: bold; text-align: center;'>
+                                    ⚠️ IMPORTANT SECURITY ADVISORY
+                                </h4>
+                                <div style='background: #ffffff; padding: 15px; border-radius: 6px; border: 1px solid #d69e2e;'>
+                                    <p style='color: #744210; margin: 0 0 10px 0; font-size: 14px; line-height: 1.6; text-align: justify;'>
+                                        <strong>OFFICIAL NOTICE:</strong> This communication is issued by Tura Municipal Board, Government of Meghalaya. This verification process is mandatory as per digital governance protocols.
+                                    </p>
+                                    <p style='color: #744210; margin: 0; font-size: 13px; line-height: 1.5; text-align: justify;'>
+                                        If you have not registered for this account, please ignore this email. This verification link expires in 24 hours for security compliance. For any queries, contact the municipal office during official hours.
+                                    </p>
+                                </div>
+                            </div>
+                            
+                            <!-- Contact Information -->
+                            <div style='text-align: center; margin-top: 40px;'>
+                                <div style='background: #f3f4f6; padding: 20px; border-radius: 10px;'>
+                                    <p style='color: #6b7280; font-size: 14px; margin: 0 0 10px 0;'>
+                                        Having trouble with verification?
+                                    </p>
+                                    <p style='color: #374151; font-weight: bold; margin: 0; font-size: 16px;'>
+                                        📧 " . config('mail.from.address') . "
+                                    </p>
+                                    <p style='color: #6b7280; font-size: 12px; margin: 10px 0 0 0;'>
+                                        We're here to help you get started!
+                                    </p>
+                                </div>
+                            </div>
+                            
+                            <!-- Alternative Verification Link -->
+                            <div style='margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center;'>
+                                <p style='color: #6b7280; font-size: 12px; margin: 0 0 10px 0;'>
+                                    If the button above doesn't work, copy and paste this link in your browser:
+                                </p>
+                                <p style='word-break: break-all; background: #f9fafb; padding: 10px; border-radius: 5px; color: #374151; font-size: 12px; font-family: monospace; margin: 0;'>
+                                    {$url}
+                                </p>
+                            </div>
+                        </div>
+                        
+                        <!-- Official Footer -->
+                        <div style='background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%); padding: 35px; text-align: center; border-top: 4px solid #d69e2e;'>
+                            <!-- Government Seal Pattern -->
+                            <div style='margin-bottom: 20px;'>
+                                <div style='display: inline-block; background: rgba(255,255,255,0.1); padding: 15px 25px; border-radius: 25px; border: 2px solid rgba(255,255,255,0.2);'>
+                                    <span style='color: #e2e8f0; font-size: 18px; font-weight: bold; letter-spacing: 1px;'>🏛️ GOVERNMENT OF MEGHALAYA</span>
+                                </div>
+                            </div>
+                            
+                            <h3 style='color: #e2e8f0; margin: 0 0 5px 0; font-size: 18px; font-weight: bold;'>
+                                Tura MUNICIPAL BOARD
+                            </h3>
+                            <p style='color: #a0aec0; margin: 0 0 8px 0; font-size: 14px; font-style: italic;'>
+                                Committed to Civic Excellence and Public Service
+                            </p>
+                            
+                            <div style='margin: 20px 0; height: 1px; background: linear-gradient(90deg, transparent 0%, #4a5568 20%, #4a5568 80%, transparent 100%);'></div>
+                            
+                            <p style='color: #a0aec0; margin: 0 0 15px 0; font-size: 13px; line-height: 1.5;'>
+                                This is an <strong>OFFICIAL COMMUNICATION</strong> from Tura Municipal Board.<br>
+                                Please do not reply to this automated verification email.
+                            </p>
+                            
+                            <div style='background: rgba(0,0,0,0.2); padding: 20px; border-radius: 8px; margin: 20px 0;'>
+                                <p style='color: #cbd5e0; margin: 0 0 8px 0; font-size: 12px; font-family: monospace;'>
+                                    © " . date('Y') . " Tura Municipal Board | Government of Meghalaya | All Rights Reserved
+                                </p>
+                                <p style='color: #a0aec0; margin: 0; font-size: 11px;'>
+                                    Established: 12th September 1979 | Digital India Initiative
+                                </p>
+                            </div>
+                            
+                            <div style='margin-top: 15px;'>
+                                <span style='color: #718096; font-size: 10px; font-style: italic;'>
+                                    Powered by Digital Governance Solutions | Government of Meghalaya
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </body>
+                </html>
             ";
 
             // Attempt to send the email
+            Log::info('About to send email', [
+                'email' => $email,
+                'from_address' => config('mail.from.address'),
+                'subject' => $mail->Subject
+            ]);
+            
             if (!$mail->send()) {
-                return back()->with("error", "Email not sent. Error: " . $mail->ErrorInfo);
+                Log::error('Registration email sending failed', [
+                    'email' => $email,
+                    'error' => $mail->ErrorInfo,
+                    'smtp_host' => config('mail.mailers.smtp.host'),
+                    'smtp_port' => config('mail.mailers.smtp.port')
+                ]);
+                throw new \Exception('Email not sent. Error: ' . $mail->ErrorInfo);
             } else {
-                return back()->with("success", "Email has been sent.");
+                Log::info('Registration email sent successfully', [
+                    'email' => $email,
+                    'token' => substr($token, 0, 10) . '...' // Log partial token for security
+                ]);
+                return true;
             }
 
         } catch (Exception $e) {
             // Catch any PHPMailer exceptions
-            return back()->with('error', 'Message could not be sent. Mailer Error: ' . $e->getMessage());
+            Log::error('Registration email exception', [
+                'email' => $email,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+            throw new \Exception('Message could not be sent. Mailer Error: ' . $e->getMessage());
         }
     }
     
+    /**
+     * Test email configuration and sending
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function testEmail(Request $request)
+    {
+        try {
+            $email = $request->input('email', 'test@example.com');
+            $testToken = 'test-token-' . time();
+            
+            // Test email sending
+            $result = $this->sendMail($testToken, $email);
+            
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Test email sent successfully',
+                'email' => $email,
+                'email_sent' => $result
+            ], 200);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Email sending failed',
+                'error' => $e->getMessage(),
+                'email_config' => [
+                    'host' => config('mail.mailers.smtp.host'),
+                    'port' => config('mail.mailers.smtp.port'),
+                    'username' => config('mail.mailers.smtp.username'),
+                    'encryption' => config('mail.mailers.smtp.encryption'),
+                    'from_address' => config('mail.from.address'),
+                    'from_name' => config('mail.from.name')
+                ]
+            ], 500);
+        }
+    }
+
+    /**
+     * Manually verify a user's email (for admin use during email issues)
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function manualVerifyEmail(Request $request)
+    {
+        try {
+            $email = $request->input('email');
+            
+            if (!$email) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Email is required'
+                ], 400);
+            }
+            
+            $user = User::where('email', $email)->first();
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found with this email'
+                ], 404);
+            }
+            
+            if ($user->verifyemail === 'active') {
+                return response()->json([
+                    'status' => 'info',
+                    'message' => 'Email is already verified'
+                ], 200);
+            }
+            
+            // Manually verify the email
+            $user->verifyemail = 'active';
+            $user->save();
+            
+            Log::info('Email manually verified by admin', [
+                'user_id' => $user->id,
+                'email' => $email,
+                'admin_ip' => $request->ip()
+            ]);
+            
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Email verified successfully',
+                'user_id' => $user->id,
+                'email' => $email
+            ], 200);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Manual verification failed',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function commandRun()
     {
         // Run a command, e.g., cache clear
