@@ -69,7 +69,7 @@ class JobController extends Controller
                 'religion' => 'required|string|max:50',
                 'identification_mark' => 'required|string|max:255',
                 'permanent_address1' => 'required|string|max:255',
-                'permanent_address2' => 'required|string|max:255',
+                'permanent_address2' => 'nullable|string|max:255',
                 'permanent_landmark' => 'nullable|string|max:255',
                 'permanent_village' => 'required|string|max:100',
                 'permanent_state' => 'required|string|max:100',
@@ -77,7 +77,7 @@ class JobController extends Controller
                 'permanent_block' => 'nullable|string|max:100',
                 'permanent_pincode' => 'required|string|max:10',
                 'present_address1' => 'required|string|max:255',
-                'present_address2' => 'required|string|max:255',
+                'present_address2' => 'nullable|string|max:255',
                 'present_landmark' => 'nullable|string|max:255',
                 'present_village' => 'required|string|max:100',
                 'present_state' => 'required|string|max:100',
@@ -300,7 +300,7 @@ class JobController extends Controller
     /**
      * Generate unique Application ID format: TMB-YYYY-JOB{job_id}-{sequence}
      */
-    private function generateApplicationId($jobId)
+    public function generateApplicationId($jobId)
     {
         $year = date('Y');
         $prefix = "TMB-{$year}-JOB{$jobId}-";
@@ -1855,10 +1855,30 @@ class JobController extends Controller
                         continue;
                     }
 
-                    // Convert file to base64
+                    // Convert file to base64 with proper validation
                     $fileContent = file_get_contents($file->getRealPath());
+                    
+                    // Validate file content was read successfully
+                    if ($fileContent === false) {
+                        throw new \Exception("Failed to read file content");
+                    }
+                    
                     $base64 = base64_encode($fileContent);
+                    
+                    // Validate base64 encoding was successful
+                    if ($base64 === false) {
+                        throw new \Exception("Failed to encode file to base64");
+                    }
+                    
+                    // Get proper MIME type
                     $mimeType = $file->getMimeType();
+                    
+                    // Fallback MIME type detection if needed
+                    if (!$mimeType || $mimeType === 'application/octet-stream') {
+                        $mimeType = $this->detectMimeType($fileExtension);
+                    }
+                    
+                    // Create data URL with proper format
                     $base64WithPrefix = 'data:' . $mimeType . ';base64,' . $base64;
 
                     // Prepare data for insertion
@@ -2045,13 +2065,31 @@ class JobController extends Controller
                 ], 404);
             }
 
-            // Convert file to base64
-            $fileContent = file_get_contents($file->getRealPath());
-            $base64 = base64_encode($fileContent);
-            $mimeType = $file->getMimeType();
-            $base64WithPrefix = 'data:' . $mimeType . ';base64,' . $base64;
-
-            // Store old document info for response
+                        // Convert file to base64 with proper validation
+                        $fileContent = file_get_contents($file->getRealPath());
+                        
+                        // Validate file content was read successfully
+                        if ($fileContent === false) {
+                            throw new \Exception("Failed to read file content for update");
+                        }
+                        
+                        $base64 = base64_encode($fileContent);
+                        
+                        // Validate base64 encoding was successful
+                        if ($base64 === false) {
+                            throw new \Exception("Failed to encode file to base64 for update");
+                        }
+                        
+                        // Get proper MIME type
+                        $mimeType = $file->getMimeType();
+                        
+                        // Fallback MIME type detection if needed
+                        if (!$mimeType || $mimeType === 'application/octet-stream') {
+                            $mimeType = $this->detectMimeType($fileExtension);
+                        }
+                        
+                        // Create data URL with proper format
+                        $base64WithPrefix = 'data:' . $mimeType . ';base64,' . $base64;            // Store old document info for response
             $oldDocumentInfo = [
                 'id' => $existingDocument->id,
                 'file_name' => $existingDocument->file_name,
@@ -2324,6 +2362,32 @@ class JobController extends Controller
                 ], 404);
             }
 
+            // Validate base64 data before returning
+            $base64Data = $document->file_base64;
+            $isValidBase64 = false;
+            $mimeType = null;
+            
+            if ($base64Data) {
+                // Check if it's a data URL and extract components
+                if (preg_match('/^data:([^;]+);base64,(.+)$/', $base64Data, $matches)) {
+                    $mimeType = $matches[1];
+                    $actualBase64 = $matches[2];
+                    
+                    // Validate base64 data
+                    $decoded = base64_decode($actualBase64, true);
+                    if ($decoded !== false && strlen($decoded) > 0) {
+                        $isValidBase64 = true;
+                        
+                        // Verify decoded size matches stored file size
+                        if (strlen($decoded) !== (int)$document->file_size) {
+                            Log::warning("Base64 decoded size mismatch for document {$document->id}. Expected: {$document->file_size}, Got: " . strlen($decoded));
+                        }
+                    }
+                } else {
+                    Log::warning("Invalid base64 data URL format for document {$document->id}");
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Document retrieved successfully',
@@ -2333,8 +2397,11 @@ class JobController extends Controller
                     'file_name' => $document->file_name,
                     'file_extension' => $document->file_extension,
                     'file_size' => $document->file_size,
+                    'file_size_kb' => round($document->file_size / 1024, 2),
                     'is_mandatory' => $document->is_mandatory,
-                    'file_base64' => $document->file_base64,
+                    'file_base64' => $base64Data,
+                    'mime_type' => $mimeType,
+                    'is_valid_base64' => $isValidBase64,
                     'uploaded_at' => $document->uploaded_at,
                 ]
             ], 200);
@@ -2662,19 +2729,33 @@ class JobController extends Controller
                 ], 200);
             }
 
-            // Continue with existing logic for job-specific progress
-            $applicationStatus = JobAppliedStatus::firstOrCreate(
-                [
+            // Handle potential duplicate records - prioritize records with application_id
+            $applicationStatus = JobAppliedStatus::where([
+                'user_id' => $userId,
+                'job_id' => $jobId
+            ])
+            ->orderByRaw('CASE WHEN application_id IS NOT NULL THEN 0 ELSE 1 END') // Records with application_id first
+            ->orderBy('id', 'asc') // Then by ID ascending (oldest first)
+            ->first();
+
+            // If no record exists, create one with application_id
+            if (!$applicationStatus) {
+                $applicationStatus = JobAppliedStatus::create([
                     'user_id' => $userId,
-                    'job_id' => $jobId
-                ],
-                [
+                    'job_id' => $jobId,
+                    'application_id' => $this->generateApplicationId($jobId),
                     'status' => JobAppliedStatus::STATUSES['draft'],
                     'stage' => JobAppliedStatus::STAGES['personal_details'],
                     'inserted_at' => now(),
                     'updated_at' => now(),
-                ]
-            );
+                ]);
+            }
+
+            // Ensure application_id is generated if missing
+            if (!$applicationStatus->application_id) {
+                $applicationStatus->application_id = $this->generateApplicationId($jobId);
+                $applicationStatus->save();
+            }
 
             // Check what sections are completed
             $completedSections = $this->checkCompletedSections($userId, $jobId);
@@ -2946,6 +3027,7 @@ class JobController extends Controller
             
             if ($applicationStatus) {
                 $paymentDetails = [
+                    'application_id' => $applicationStatus->application_id,
                     'applicable_fee' => $applicationStatus->payment_amount,
                     'payment_status' => $applicationStatus->payment_status,
                     'payment_transaction_id' => $applicationStatus->payment_transaction_id ?? null,
@@ -2995,14 +3077,57 @@ class JobController extends Controller
             \Log::warning('Failed to get qualification details: ' . $e->getMessage());
         }
 
-        // Get uploaded documents
+        // Get uploaded documents with file URLs
         $uploadedDocuments = [];
         try {
             if (\Schema::hasTable('tura_job_documents_upload')) {
-                $uploadedDocuments = JobDocumentUpload::where([
+                // First, try to get all available columns
+                $availableColumns = \Schema::getColumnListing('tura_job_documents_upload');
+                $selectColumns = ['document_type', 'file_name', 'uploaded_at'];
+                
+                // Add optional columns if they exist
+                if (in_array('file_size', $availableColumns)) {
+                    $selectColumns[] = 'file_size';
+                }
+                if (in_array('mime_type', $availableColumns)) {
+                    $selectColumns[] = 'mime_type';
+                }
+
+                $documents = JobDocumentUpload::where([
                     'user_id' => $userId,
                     'job_id' => $jobId
-                ])->select(['document_type', 'file_name', 'uploaded_at'])->get();
+                ])->select($selectColumns)->get();
+
+                // Add file URLs to each document
+                $uploadedDocuments = $documents->map(function ($document) {
+                    $fileUrl = $this->generateFileUrl($document->file_name);
+                    $filePath = $this->findFileInStorage($document->file_name);
+                    $fileExists = $filePath !== null;
+                    
+                    // Get actual file size and mime type if file exists
+                    $actualFileSize = null;
+                    $actualMimeType = null;
+                    if ($fileExists && $filePath) {
+                        try {
+                            $actualFileSize = filesize($filePath);
+                            $extension = strtolower(pathinfo($document->file_name, PATHINFO_EXTENSION));
+                            $actualMimeType = $this->getMimeType($extension);
+                        } catch (\Exception $e) {
+                            \Log::warning('Failed to get file info for: ' . $document->file_name);
+                        }
+                    }
+
+                    return [
+                        'document_type' => $document->document_type,
+                        'file_name' => $document->file_name,
+                        'uploaded_at' => $document->uploaded_at,
+                        'file_size' => $document->file_size ?? $actualFileSize,
+                        'mime_type' => $document->mime_type ?? $actualMimeType,
+                        'file_url' => $fileUrl,
+                        'file_exists' => $fileExists,
+                        'file_path' => $fileExists ? basename(dirname($filePath)) . '/' . basename($filePath) : null, // For debugging
+                    ];
+                })->toArray();
             }
         } catch (\Exception $e) {
             \Log::warning('Failed to get uploaded documents: ' . $e->getMessage());
@@ -3202,6 +3327,12 @@ class JobController extends Controller
                     'updated_at' => now(),
                 ]
             );
+
+            // Ensure application_id is generated if missing
+            if (!$applicationStatus->application_id) {
+                $applicationStatus->application_id = $this->generateApplicationId($jobId);
+                $applicationStatus->save();
+            }
 
             // If already exists, update to at least personal_details stage
             if ($applicationStatus->stage < JobAppliedStatus::STAGES['personal_details']) {
@@ -4662,5 +4793,193 @@ class JobController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Detect MIME type based on file extension
+     * Fallback method when getMimeType() fails
+     *
+     * @param string $extension
+     * @return string
+     */
+    private function detectMimeType($extension)
+    {
+        $mimeTypes = [
+            // Images
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'bmp' => 'image/bmp',
+            'webp' => 'image/webp',
+            'svg' => 'image/svg+xml',
+            
+            // Documents
+            'pdf' => 'application/pdf',
+            'doc' => 'application/msword',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'xls' => 'application/vnd.ms-excel',
+            'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'ppt' => 'application/vnd.ms-powerpoint',
+            'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'txt' => 'text/plain',
+            'rtf' => 'application/rtf',
+            
+            // Archives
+            'zip' => 'application/zip',
+            'rar' => 'application/x-rar-compressed',
+            '7z' => 'application/x-7z-compressed',
+            
+            // Other
+            'json' => 'application/json',
+            'xml' => 'application/xml',
+        ];
+
+        return $mimeTypes[strtolower($extension)] ?? 'application/octet-stream';
+    }
+
+    /**
+     * Generate file URL for uploaded documents
+     * 
+     * @param string $filename
+     * @return string|null
+     */
+    private function generateFileUrl($filename)
+    {
+        if (!$filename) {
+            return null;
+        }
+
+        // Use the API endpoint for serving files
+        $baseUrl = config('app.url');
+        
+        // URL encode the filename to handle special characters and spaces
+        $encodedFilename = urlencode($filename);
+        
+        return "{$baseUrl}/api/files/{$encodedFilename}";
+    }
+
+    /**
+     * Check if file exists in any of the possible storage locations
+     * 
+     * @param string $filename
+     * @return string|null Returns the full file path if found, null otherwise
+     */
+    private function findFileInStorage($filename)
+    {
+        if (!$filename) {
+            return null;
+        }
+
+        // Possible storage paths where files might be located
+        $possiblePaths = [
+            storage_path('app/uploads/' . $filename),
+            storage_path('app/public/uploads/' . $filename),
+            public_path('uploads/' . $filename),
+            storage_path('uploads/' . $filename),
+        ];
+
+        foreach ($possiblePaths as $path) {
+            if (file_exists($path)) {
+                return $path;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Serve file from storage - API endpoint to serve uploaded files
+     * 
+     * @param Request $request
+     * @param string $filename
+     * @return \Illuminate\Http\Response
+     */
+    public function serveFile(Request $request, $filename)
+    {
+        try {
+            // Decode the filename from URL encoding
+            $decodedFilename = urldecode($filename);
+            
+            // Security: Validate file extension to prevent directory traversal
+            $allowedExtensions = ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx'];
+            $fileExtension = strtolower(pathinfo($decodedFilename, PATHINFO_EXTENSION));
+            
+            if (!in_array($fileExtension, $allowedExtensions)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'File type not allowed',
+                    'allowed_types' => $allowedExtensions
+                ], 403);
+            }
+
+            // Security: Prevent directory traversal attacks
+            if (str_contains($decodedFilename, '..') || str_contains($decodedFilename, '/') || str_contains($decodedFilename, '\\')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid filename'
+                ], 400);
+            }
+
+            // Find file in storage locations
+            $filePath = $this->findFileInStorage($decodedFilename);
+
+            if (!$filePath) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'File not found',
+                    'filename' => $decodedFilename
+                ], 404);
+            }
+
+            // Get file info
+            $fileSize = filesize($filePath);
+            $mimeType = $this->getMimeType($fileExtension);
+            
+            // Set headers for caching and CORS
+            $headers = [
+                'Content-Type' => $mimeType,
+                'Content-Length' => $fileSize,
+                'Cache-Control' => 'public, max-age=86400', // Cache for 1 day
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
+            ];
+
+            // For images, add additional headers
+            if (in_array($fileExtension, ['jpg', 'jpeg', 'png'])) {
+                $headers['Content-Disposition'] = 'inline; filename="' . $decodedFilename . '"';
+            } else {
+                $headers['Content-Disposition'] = 'attachment; filename="' . $decodedFilename . '"';
+            }
+
+            return response()->file($filePath, $headers);
+
+        } catch (\Exception $e) {
+            Log::error('Error serving file: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error serving file',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Handle preflight CORS requests for file serving
+     * 
+     * @param Request $request
+     * @param string $filename
+     * @return \Illuminate\Http\Response
+     */
+    public function serveFileOptions(Request $request, $filename)
+    {
+        return response('', 200, [
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+            'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
+            'Access-Control-Max-Age' => '86400',
+        ]);
     }
 }

@@ -15,20 +15,52 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie', 'logout', '*'],
 
-    'allowed_methods' => ['*'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
-    'allowed_origins' => ['*'],
+    /*
+     * Allow multiple origins for production deployment
+     * Include both your frontend domain and backend domain
+     */
+    'allowed_origins' => [
+        'https://turamunicipalboard.com',
+        'https://www.turamunicipalboard.com',
+        'https://laravelv2.turamunicipalboard.com',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        env('FRONTEND_URL', env('APP_URL'))
+    ],
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '#^https://.*\.turamunicipalboard\.com$#',
+        '#^http://localhost:\d+$#',
+        '#^http://127\.0\.0\.1:\d+$#'
+    ],
 
-    'allowed_headers' => ['*'],
+    'allowed_headers' => [
+        'Accept',
+        'Authorization',
+        'Content-Type',
+        'X-Requested-With',
+        'X-CSRF-TOKEN',
+        'X-Socket-ID',
+        'Origin',
+        'Cache-Control',
+        'Pragma'
+    ],
 
-    'exposed_headers' => [],
+    'exposed_headers' => [
+        'Cache-Control',
+        'Content-Language',
+        'Content-Type',
+        'Expires',
+        'Last-Modified',
+        'Pragma'
+    ],
 
-    'max_age' => 0,
+    'max_age' => 86400, // 24 hours
 
-    'supports_credentials' => false,
+    'supports_credentials' => true,
 
 ];

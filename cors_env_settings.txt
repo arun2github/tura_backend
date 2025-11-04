@@ -1,0 +1,16 @@
+# CORS Configuration for Production
+# Add these to your .env file on production server
+
+# CORS Settings
+CORS_SUPPORTS_CREDENTIALS=true
+
+# Frontend URLs that should be allowed
+FRONTEND_URL=https://turamunicipalboard.com
+APP_URL=https://laravelv2.turamunicipalboard.com
+
+# Session Settings (important for CORS with credentials)
+SESSION_DOMAIN=.turamunicipalboard.com
+SANCTUM_STATEFUL_DOMAINS=turamunicipalboard.com,www.turamunicipalboard.com,laravelv2.turamunicipalboard.com
+
+# Security Headers
+SECURE_HEADERS=true

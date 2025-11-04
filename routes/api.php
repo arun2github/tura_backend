@@ -7,6 +7,7 @@ use App\Http\Controllers\FormController;
 use App\Http\Controllers\ForgotPasswordController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\JobController;
+use App\Http\Controllers\JobPaymentController;
 
 
 /*
@@ -109,7 +110,20 @@ Route::group(['middleware' => 'api'], function() {
         // Application ID Generation and Email
         Route::post('generateApplicationIdAndSendEmail', [JobController::class, 'generateApplicationIdAndSendEmail']);
         Route::post('sendPaymentConfirmationEmail', [JobController::class, 'sendPaymentConfirmationEmail']);
+        
+        // Job Payment APIs
+        Route::post('job-payment/initiate', [JobPaymentController::class, 'initiatePayment']);
+        Route::get('job-payment/status/{application_id}', [JobPaymentController::class, 'getPaymentStatus']);
     });
+    
+    // Job Payment Gateway Routes (No authentication required for gateway callbacks)
+    Route::get('job-payment-form', [JobPaymentController::class, 'showPaymentForm']);
+    Route::post('job-payment/success', [JobPaymentController::class, 'handlePaymentSuccess']);
+    Route::post('job-payment/failure', [JobPaymentController::class, 'handlePaymentFailure']);
+    
+    // File Serving Routes (No authentication required for file access)
+    Route::get('files/{filename}', [JobController::class, 'serveFile'])->name('api.files.serve');
+    Route::options('files/{filename}', [JobController::class, 'serveFileOptions'])->name('api.files.options');
 });
 Route::post('command', [UserController::class, 'commandRun']);
 

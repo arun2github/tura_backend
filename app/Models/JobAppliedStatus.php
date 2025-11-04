@@ -61,6 +61,22 @@ class JobAppliedStatus extends Model
     ];
 
     /**
+     * Boot method to automatically generate application_id when creating a new record
+     */
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function ($model) {
+            if (!$model->application_id && $model->job_id) {
+                // Use the generateApplicationId from JobController
+                $controller = new \App\Http\Controllers\JobController();
+                $model->application_id = $controller->generateApplicationId($model->job_id);
+            }
+        });
+    }
+
+    /**
      * Application stages
      */
     const STAGES = [

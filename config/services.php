@@ -31,4 +31,11 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'sbiepay' => [
+        'key' => env('PAYMENT_KEY'),
+        'merchant_id' => env('SBIEPAY_MERCHANT_ID', '1003253'),
+        'gateway_url' => env('SBIEPAY_GATEWAY_URL', 'https://www.sbiepay.sbi/secure/AggregatorHostedListener'),
+        'verification_url' => env('SBIEPAY_VERIFICATION_URL', 'https://www.sbiepay.sbi/payagg/statusQuery/getStatusQuery'),
+    ],
+
 ];
