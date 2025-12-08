@@ -31,18 +31,47 @@ class JobController extends Controller
     public function getJobs()
     {
         try {
+            // Debug logging for CORS and request info
+            Log::warning('Job API Debug - getJobs Request', [
+                'method' => request()->method(),
+                'url' => request()->fullUrl(),
+                'origin' => request()->header('Origin'),
+                'user_agent' => request()->userAgent(),
+                'headers' => request()->headers->all(),
+                'ip_address' => request()->ip()
+            ]);
+
             $jobs = JobPosting::all();
+            
+            // Debug logging for successful response
+            Log::warning('Job API Debug - getJobs Success', [
+                'jobs_count' => $jobs->count(),
+                'response_status' => 200
+            ]);
             
             return response()->json([
                 'success' => true,
                 'jobs' => $jobs
-            ], 200);
+            ], 200)->header('Access-Control-Allow-Origin', '*')
+                  ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                  ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
 
         } catch (\Exception $e) {
+            // Debug logging for errors
+            Log::error('Job API Debug - getJobs Error', [
+                'error_message' => $e->getMessage(),
+                'error_trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+            
             return response()->json([
                 'success' => false,
-                'message' => 'Error fetching jobs'
-            ], 500);
+                'message' => 'Error fetching jobs',
+                'error' => $e->getMessage()
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                  ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                  ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         }
     }
 
@@ -150,14 +179,23 @@ class JobController extends Controller
                 // Check if application status exists, if not create it
                 $applicationStatus = $this->getOrCreateApplicationStatus($userId, $request->job_id, $request->email);
                 
+                // Update payment amount now that we have personal details
+                $this->updatePaymentAmount($userId, $request->job_id);
+                
+                // Get updated application status with correct payment amount
+                $updatedApplicationStatus = JobAppliedStatus::where([
+                    'user_id' => $userId,
+                    'job_id' => $request->job_id
+                ])->first();
+                
                 return response()->json([
                     'success' => true,
                     'message' => 'Personal details updated successfully',
                     'data' => $existingRecord->fresh(),
                     'action' => 'updated',
                     'record_id' => $existingRecord->id,
-                    'application_id' => $applicationStatus['application_id'],
-                    'payment_amount' => $applicationStatus['payment_amount'],
+                    'application_id' => $updatedApplicationStatus->application_id,
+                    'payment_amount' => $updatedApplicationStatus->payment_amount,
                     'email_sent' => $applicationStatus['email_sent']
                 ], 200);
             } else {
@@ -168,10 +206,19 @@ class JobController extends Controller
                 // Generate Application ID and create application status
                 $applicationStatus = $this->createApplicationStatus($userId, $request->job_id, $request->email);
                 
+                // Update payment amount now that we have personal details
+                $this->updatePaymentAmount($userId, $request->job_id);
+                
+                // Get updated application status with correct payment amount
+                $updatedApplicationStatus = JobAppliedStatus::where([
+                    'user_id' => $userId,
+                    'job_id' => $request->job_id
+                ])->first();
+                
                 // Send application confirmation email
                 $emailResult = $this->sendApplicationConfirmationEmail(
                     $request->email,
-                    $applicationStatus['application_id'],
+                    $updatedApplicationStatus->application_id,
                     $request->job_id,
                     $authenticatedUser->firstname . ' ' . $authenticatedUser->lastname
                 );
@@ -182,8 +229,8 @@ class JobController extends Controller
                     'data' => $personalDetails,
                     'action' => 'created',
                     'record_id' => $personalDetails->id,
-                    'application_id' => $applicationStatus['application_id'],
-                    'payment_amount' => $applicationStatus['payment_amount'],
+                    'application_id' => $updatedApplicationStatus->application_id,
+                    'payment_amount' => $updatedApplicationStatus->payment_amount,
                     'email_sent' => $emailResult['success'],
                     'email_message' => $emailResult['message']
                 ], 201);
@@ -215,8 +262,9 @@ class JobController extends Controller
             throw new \Exception("Job posting not found for ID: {$jobId}");
         }
         
-        // Calculate payment amount based on user's personal details category
-        $paymentAmount = $this->calculatePaymentAmount($userId, $jobId);
+        // Don't calculate payment amount yet - will be updated when personal details are saved
+        // For now, set to 0 and update later when we have user category
+        $paymentAmount = 0;
         
         // Create application status record
         $applicationStatus = JobAppliedStatus::create([
@@ -257,17 +305,13 @@ class JobController extends Controller
                 $existingStatus->application_id = $this->generateApplicationId($jobId);
             }
             
-            // Check if payment_amount is missing and calculate it
-            if (!$existingStatus->payment_amount || $existingStatus->payment_amount == 0) {
-                $existingStatus->payment_amount = $this->calculatePaymentAmount($userId, $jobId);
-            }
-            
-            // Update email if provided
+            // PRODUCTION FIX: DON'T calculate payment amount here - it will be done after personal details are saved
+            // Just update email if provided
             if ($email) {
                 $existingStatus->email = $email;
             }
             
-            // Save the updates
+            // Save the updates (without payment calculation)
             $existingStatus->save();
             
             // Send email if not sent yet
@@ -288,7 +332,7 @@ class JobController extends Controller
             
             return [
                 'application_id' => $existingStatus->application_id,
-                'payment_amount' => $existingStatus->payment_amount,
+                'payment_amount' => $existingStatus->payment_amount, // Return current amount (may be 0)
                 'email_sent' => $existingStatus->job_applied_email_sent,
                 'status' => 'updated'
             ];
@@ -324,38 +368,350 @@ class JobController extends Controller
     }
     
     /**
-     * Calculate payment amount based on user category and job posting fees
+     * PRODUCTION FIX: Enhanced payment calculation with comprehensive validation and logging
      */
     private function calculatePaymentAmount($userId, $jobId)
     {
-        // Get job posting details
-        $jobPosting = TuraJobPosting::find($jobId);
-        if (!$jobPosting) {
-            return 0;
-        }
-        
-        // Get user's personal details to find category
-        $personalDetails = JobPersonalDetail::where([
-            'user_id' => $userId,
-            'job_id' => $jobId
-        ])->first();
-        
-        if (!$personalDetails) {
-            return $jobPosting->fee_general; // Default to general category
-        }
-        
-        $userCategory = strtoupper($personalDetails->category);
-        
-        switch ($userCategory) {
-            case 'SC':
-            case 'ST':
-                return $jobPosting->fee_sc_st ?? 0;
-            case 'OBC':
-                return $jobPosting->fee_obc ?? $jobPosting->fee_general;
-            case 'UR':
-            case 'GENERAL':
-            default:
+        // Use the enhanced safe calculation method
+        return $this->calculatePaymentAmountSafely($userId, $jobId);
+    }
+
+    /**
+     * PRODUCTION FIX: Safe payment calculation with comprehensive error handling
+     */
+    private function calculatePaymentAmountSafely($userId, $jobId)
+    {
+        try {
+            Log::info('Safe payment calculation started', [
+                'user_id' => $userId,
+                'job_id' => $jobId
+            ]);
+
+            // Get job posting details with validation
+            $jobPosting = TuraJobPosting::find($jobId);
+            if (!$jobPosting) {
+                Log::error('Job posting not found for payment calculation', [
+                    'job_id' => $jobId
+                ]);
+                return 0;
+            }
+
+            Log::info('Job posting found', [
+                'job_id' => $jobId,
+                'fee_general' => $jobPosting->fee_general,
+                'fee_sc_st' => $jobPosting->fee_sc_st,
+                'fee_obc' => $jobPosting->fee_obc ?? 'NULL'
+            ]);
+
+            // Get user's personal details with multiple attempts
+            $personalDetails = JobPersonalDetail::where([
+                'user_id' => $userId,
+                'job_id' => $jobId
+            ])->first();
+            
+            if (!$personalDetails) {
+                Log::warning('Personal details not found - using general category fee', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId,
+                    'fallback_amount' => $jobPosting->fee_general
+                ]);
                 return $jobPosting->fee_general ?? 0;
+            }
+
+            $userCategory = strtoupper(trim($personalDetails->category));
+            
+            Log::info('Personal details found for payment calculation', [
+                'user_id' => $userId,
+                'job_id' => $jobId,
+                'category' => $userCategory,
+                'full_name' => $personalDetails->full_name
+            ]);
+
+            // Calculate payment amount with comprehensive validation
+            $paymentAmount = 0;
+            $appliedFeeType = 'unknown';
+
+            switch ($userCategory) {
+                case 'SC':
+                case 'ST':
+                    $paymentAmount = $jobPosting->fee_sc_st ?? 0;
+                    $appliedFeeType = 'SC/ST';
+                    break;
+                    
+                case 'OBC':
+                    $paymentAmount = $jobPosting->fee_obc ?? $jobPosting->fee_general ?? 0;
+                    $appliedFeeType = 'OBC';
+                    break;
+                    
+                case 'UR':
+                case 'GENERAL':
+                case 'GEN':
+                default:
+                    $paymentAmount = $jobPosting->fee_general ?? 0;
+                    $appliedFeeType = 'General';
+                    break;
+            }
+
+            // Final validation - ensure amount is never zero for production
+            if ($paymentAmount <= 0) {
+                Log::error('Calculated payment amount is zero or negative - applying fallback', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId,
+                    'category' => $userCategory,
+                    'calculated_amount' => $paymentAmount,
+                    'fallback_amount' => $jobPosting->fee_general
+                ]);
+                $paymentAmount = $jobPosting->fee_general ?? 100; // Emergency fallback
+                $appliedFeeType = 'Emergency Fallback';
+            }
+
+            Log::info('Payment calculation completed successfully', [
+                'user_id' => $userId,
+                'job_id' => $jobId,
+                'category' => $userCategory,
+                'applied_fee_type' => $appliedFeeType,
+                'payment_amount' => $paymentAmount
+            ]);
+
+            return $paymentAmount;
+
+        } catch (\Exception $e) {
+            Log::error('Error in safe payment calculation', [
+                'user_id' => $userId,
+                'job_id' => $jobId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            // Emergency fallback - try to get general fee
+            try {
+                $jobPosting = TuraJobPosting::find($jobId);
+                return $jobPosting->fee_general ?? 100;
+            } catch (\Exception $e2) {
+                Log::critical('Emergency fallback failed in payment calculation', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId,
+                    'error' => $e2->getMessage()
+                ]);
+                return 100; // Absolute emergency fallback
+            }
+        }
+    }
+
+    /**
+     * PRODUCTION FIX: Validate and fix payment amount 
+     * This method ensures payment amount is never zero for legitimate applications
+     * Called at multiple stages to guarantee data integrity
+     */
+    private function validateAndFixPaymentAmount($userId, $jobId, $forceRecalculate = false)
+    {
+        try {
+            Log::info('Payment validation started', [
+                'user_id' => $userId,
+                'job_id' => $jobId,
+                'force_recalculate' => $forceRecalculate
+            ]);
+
+            // Get application status
+            $applicationStatus = JobAppliedStatus::where([
+                'user_id' => $userId,
+                'job_id' => $jobId
+            ])->first();
+
+            if (!$applicationStatus) {
+                Log::error('Application status not found for payment validation', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId
+                ]);
+                return false;
+            }
+
+            // Get current payment amount
+            $currentPaymentAmount = $applicationStatus->payment_amount;
+            
+            // Calculate correct payment amount
+            $correctPaymentAmount = $this->calculatePaymentAmountSafely($userId, $jobId);
+            
+            // Check if payment amount needs fixing
+            $needsFix = ($currentPaymentAmount == 0 || $currentPaymentAmount == null || $forceRecalculate) && $correctPaymentAmount > 0;
+            
+            if ($needsFix) {
+                Log::warning('Payment amount requires fix', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId,
+                    'application_id' => $applicationStatus->application_id,
+                    'current_amount' => $currentPaymentAmount,
+                    'correct_amount' => $correctPaymentAmount,
+                    'stage' => $applicationStatus->stage
+                ]);
+
+                // Update payment amount
+                $applicationStatus->update([
+                    'payment_amount' => $correctPaymentAmount,
+                    'updated_at' => now()
+                ]);
+
+                Log::info('Payment amount fixed successfully', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId,
+                    'application_id' => $applicationStatus->application_id,
+                    'old_amount' => $currentPaymentAmount,
+                    'new_amount' => $correctPaymentAmount
+                ]);
+
+                return $correctPaymentAmount;
+            }
+
+            Log::info('Payment amount validation completed - no fix needed', [
+                'user_id' => $userId,
+                'job_id' => $jobId,
+                'payment_amount' => $currentPaymentAmount
+            ]);
+
+            return $currentPaymentAmount;
+
+        } catch (\Exception $e) {
+            Log::error('Error in payment amount validation', [
+                'user_id' => $userId,
+                'job_id' => $jobId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * PRODUCTION FIX: Bulk fix for all existing applications with zero payment amounts
+     * This method can be called manually or via cron to fix all legacy data
+     */
+    public function bulkFixZeroPaymentAmounts(Request $request)
+    {
+        try {
+            Log::info('Starting bulk fix for zero payment amounts');
+            
+            // Find all applications with zero payment amounts that have personal details
+            $zeroPaymentApplications = JobAppliedStatus::where('payment_amount', 0)
+                ->whereHas('personalDetails', function($query) {
+                    $query->whereNotNull('category');
+                })
+                ->with(['personalDetails', 'jobPosting'])
+                ->get();
+            
+            $fixedCount = 0;
+            $errorCount = 0;
+            $results = [];
+            
+            foreach ($zeroPaymentApplications as $application) {
+                try {
+                    $validatedAmount = $this->validateAndFixPaymentAmount(
+                        $application->user_id, 
+                        $application->job_id, 
+                        true // Force recalculate
+                    );
+                    
+                    if ($validatedAmount !== false && $validatedAmount > 0) {
+                        $fixedCount++;
+                        $results[] = [
+                            'application_id' => $application->application_id,
+                            'user_id' => $application->user_id,
+                            'job_id' => $application->job_id,
+                            'old_amount' => 0,
+                            'new_amount' => $validatedAmount,
+                            'status' => 'fixed'
+                        ];
+                    } else {
+                        $errorCount++;
+                        $results[] = [
+                            'application_id' => $application->application_id,
+                            'user_id' => $application->user_id,
+                            'job_id' => $application->job_id,
+                            'old_amount' => 0,
+                            'new_amount' => $validatedAmount,
+                            'status' => 'error'
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    $errorCount++;
+                    $results[] = [
+                        'application_id' => $application->application_id,
+                        'user_id' => $application->user_id,
+                        'job_id' => $application->job_id,
+                        'old_amount' => 0,
+                        'new_amount' => null,
+                        'status' => 'exception',
+                        'error' => $e->getMessage()
+                    ];
+                    
+                    Log::error('Error fixing payment amount for application', [
+                        'application_id' => $application->application_id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+            
+            Log::info('Bulk fix completed', [
+                'total_applications' => count($zeroPaymentApplications),
+                'fixed_count' => $fixedCount,
+                'error_count' => $errorCount
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Bulk fix completed successfully',
+                'summary' => [
+                    'total_applications_found' => count($zeroPaymentApplications),
+                    'successfully_fixed' => $fixedCount,
+                    'errors_occurred' => $errorCount
+                ],
+                'details' => $results
+            ], 200);
+            
+        } catch (\Exception $e) {
+            Log::error('Error in bulk fix operation', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error in bulk fix operation',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * PRODUCTION FIX: Enhanced updatePaymentAmount with validation
+     */
+    private function updatePaymentAmount($userId, $jobId)
+    {
+        try {
+            Log::info('Updating payment amount', [
+                'user_id' => $userId,
+                'job_id' => $jobId
+            ]);
+
+            // Use the safe validation method
+            $paymentAmount = $this->validateAndFixPaymentAmount($userId, $jobId, true);
+            
+            if ($paymentAmount === false) {
+                Log::error('Failed to validate/fix payment amount');
+                return 0;
+            }
+
+            Log::info('Payment amount update completed', [
+                'user_id' => $userId,
+                'job_id' => $jobId,
+                'payment_amount' => $paymentAmount
+            ]);
+            
+            return $paymentAmount;
+            
+        } catch (\Exception $e) {
+            Log::error('Error updating payment amount: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return 0;
         }
     }
     
@@ -918,19 +1274,20 @@ class JobController extends Controller
             // Get authenticated user from JWT middleware
             $authenticatedUser = $request->input('authenticated_user');
             
-            $validator = Validator::make($request->all(), [
-                'job_id' => 'required|integer',
-                'employment_records' => 'required|array|min:1',
-                'employment_records.*.occupation_status' => 'required|string|max:50',
-                'employment_records.*.is_government_employee' => 'required|boolean',
-                'employment_records.*.state_where_employed' => 'required|string|max:100',
-                'employment_records.*.appointment_type' => 'required|string|max:50',
-                'employment_records.*.name_of_organization' => 'required|string|max:255',
-                'employment_records.*.designation' => 'required|string|max:100',
-                'employment_records.*.date_of_joining' => 'required|date',
-                'employment_records.*.duration_in_months' => 'required|integer|min:1',
-                'employment_records.*.job_description' => 'required|string|max:1000',
-            ]);
+      $validator = Validator::make($request->all(), [
+    'job_id' => 'nullable|integer',
+    'employment_records' => 'nullable|array',
+    'employment_records.*.occupation_status' => 'nullable|string|max:50',
+    'employment_records.*.is_government_employee' => 'nullable|boolean',
+    'employment_records.*.state_where_employed' => 'nullable|string|max:100',
+    'employment_records.*.appointment_type' => 'nullable|string|max:50',
+    'employment_records.*.name_of_organization' => 'nullable|string|max:255',
+    'employment_records.*.designation' => 'nullable|string|max:100',
+    'employment_records.*.date_of_joining' => 'nullable|date',
+    'employment_records.*.duration_in_months' => 'nullable|integer|min:0',
+    'employment_records.*.job_description' => 'nullable|string|max:1000',
+]);
+
 
             if ($validator->fails()) {
                 return response()->json([
@@ -1662,6 +2019,24 @@ class JobController extends Controller
             // Determine HTTP status code
             if (count($savedRecords) > 0 || count($duplicateRecords) > 0) {
                 $statusCode = 201; // Created/Updated - records were saved or updated
+                
+                // PRODUCTION FIX: Validate payment amount after qualification details are saved
+                // This ensures any existing zero payment amounts are corrected
+                Log::info('Validating payment amount after qualification details save', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId,
+                    'saved_records_count' => count($savedRecords)
+                ]);
+                
+                $validatedPaymentAmount = $this->validateAndFixPaymentAmount($userId, $jobId, false);
+                
+                if ($validatedPaymentAmount !== false && $validatedPaymentAmount > 0) {
+                    Log::info('Payment amount validated/fixed after qualification details save', [
+                        'user_id' => $userId,
+                        'job_id' => $jobId,
+                        'validated_payment_amount' => $validatedPaymentAmount
+                    ]);
+                }
             } else {
                 $statusCode = 400; // Bad Request - errors occurred
                 $response['success'] = false;
@@ -1959,6 +2334,24 @@ class JobController extends Controller
             // Determine HTTP status code
             if (count($uploadedDocuments) > 0 || count($duplicateDocuments) > 0) {
                 $statusCode = 201; // Created/Updated
+                
+                // PRODUCTION FIX: Validate payment amount after documents are uploaded
+                // This ensures any existing zero payment amounts are corrected
+                Log::info('Validating payment amount after document upload', [
+                    'user_id' => $request->user_id,
+                    'job_id' => $request->job_id,
+                    'uploaded_documents_count' => count($uploadedDocuments)
+                ]);
+                
+                $validatedPaymentAmount = $this->validateAndFixPaymentAmount($request->user_id, $request->job_id, false);
+                
+                if ($validatedPaymentAmount !== false && $validatedPaymentAmount > 0) {
+                    Log::info('Payment amount validated/fixed after document upload', [
+                        'user_id' => $request->user_id,
+                        'job_id' => $request->job_id,
+                        'validated_payment_amount' => $validatedPaymentAmount
+                    ]);
+                }
             } else {
                 $statusCode = 400; // Bad Request - errors occurred
                 $response['success'] = false;
@@ -2571,6 +2964,32 @@ class JobController extends Controller
             // 9. Get Job Details
             $jobDetails = JobPosting::find($jobId);
 
+            // PRODUCTION FIX: Validate payment amount whenever complete details are requested
+            // This catches applications with zero payment amounts at any stage
+            if ($personalDetails) {
+                Log::info('Validating payment amount during complete application details check', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId,
+                    'completion_percentage' => $completionPercentage
+                ]);
+                
+                $validatedPaymentAmount = $this->validateAndFixPaymentAmount($userId, $jobId, false);
+                
+                if ($validatedPaymentAmount !== false && $validatedPaymentAmount > 0) {
+                    Log::info('Payment amount validated/fixed during complete details check', [
+                        'user_id' => $userId,
+                        'job_id' => $jobId,
+                        'validated_payment_amount' => $validatedPaymentAmount
+                    ]);
+                } else {
+                    Log::warning('Payment validation failed during complete details check', [
+                        'user_id' => $userId,
+                        'job_id' => $jobId,
+                        'validation_result' => $validatedPaymentAmount
+                    ]);
+                }
+            }
+
             // 10. Build Response with organized structure
             $response = [
                 'success' => true,
@@ -2759,6 +3178,38 @@ class JobController extends Controller
 
             // Check what sections are completed
             $completedSections = $this->checkCompletedSections($userId, $jobId);
+            
+            // PRODUCTION FIX: Validate payment amount whenever progress is checked
+            // This catches all existing applications with zero payment amounts
+            if ($completedSections['personal_details']) {
+                Log::info('Validating payment amount during progress check', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId,
+                    'application_id' => $applicationStatus->application_id,
+                    'current_payment_amount' => $applicationStatus->payment_amount
+                ]);
+                
+                $validatedPaymentAmount = $this->validateAndFixPaymentAmount($userId, $jobId, false);
+                
+                if ($validatedPaymentAmount !== false && $validatedPaymentAmount > 0) {
+                    // Refresh application status to get updated payment amount
+                    $applicationStatus->refresh();
+                    
+                    Log::info('Payment amount validated/fixed during progress check', [
+                        'user_id' => $userId,
+                        'job_id' => $jobId,
+                        'application_id' => $applicationStatus->application_id,
+                        'validated_payment_amount' => $applicationStatus->payment_amount
+                    ]);
+                } else {
+                    Log::warning('Payment validation returned invalid result during progress check', [
+                        'user_id' => $userId,
+                        'job_id' => $jobId,
+                        'application_id' => $applicationStatus->application_id,
+                        'validation_result' => $validatedPaymentAmount
+                    ]);
+                }
+            }
             
             // Determine current stage based on completed sections
             $calculatedStage = $this->calculateCurrentStage($completedSections);
@@ -3081,9 +3532,9 @@ class JobController extends Controller
         $uploadedDocuments = [];
         try {
             if (\Schema::hasTable('tura_job_documents_upload')) {
-                // First, try to get all available columns
+                // Get all available columns
                 $availableColumns = \Schema::getColumnListing('tura_job_documents_upload');
-                $selectColumns = ['document_type', 'file_name', 'uploaded_at'];
+                $selectColumns = ['id', 'document_type', 'file_name', 'uploaded_at'];
                 
                 // Add optional columns if they exist
                 if (in_array('file_size', $availableColumns)) {
@@ -3091,6 +3542,12 @@ class JobController extends Controller
                 }
                 if (in_array('mime_type', $availableColumns)) {
                     $selectColumns[] = 'mime_type';
+                }
+                if (in_array('file_base64', $availableColumns)) {
+                    $selectColumns[] = 'file_base64';
+                }
+                if (in_array('file_extension', $availableColumns)) {
+                    $selectColumns[] = 'file_extension';
                 }
 
                 $documents = JobDocumentUpload::where([
@@ -3100,14 +3557,22 @@ class JobController extends Controller
 
                 // Add file URLs to each document
                 $uploadedDocuments = $documents->map(function ($document) {
-                    $fileUrl = $this->generateFileUrl($document->file_name);
+                    // Check if file exists on disk (legacy system)
                     $filePath = $this->findFileInStorage($document->file_name);
-                    $fileExists = $filePath !== null;
+                    $diskFileExists = $filePath !== null;
                     
-                    // Get actual file size and mime type if file exists
+                    // Check if file exists as base64 in database (current system)
+                    $hasBase64 = isset($document->file_base64) && !empty($document->file_base64);
+                    
+                    // Determine storage type and existence
+                    $storageType = $hasBase64 ? 'database' : ($diskFileExists ? 'disk' : 'missing');
+                    $fileExists = $diskFileExists || $hasBase64;
+                    
+                    // Get file info
                     $actualFileSize = null;
                     $actualMimeType = null;
-                    if ($fileExists && $filePath) {
+                    
+                    if ($diskFileExists && $filePath) {
                         try {
                             $actualFileSize = filesize($filePath);
                             $extension = strtolower(pathinfo($document->file_name, PATHINFO_EXTENSION));
@@ -3115,17 +3580,24 @@ class JobController extends Controller
                         } catch (\Exception $e) {
                             \Log::warning('Failed to get file info for: ' . $document->file_name);
                         }
+                    } elseif ($hasBase64) {
+                        // Extract MIME type from base64 data URL
+                        if (preg_match('/data:([^;]+);base64,/', $document->file_base64, $matches)) {
+                            $actualMimeType = $matches[1];
+                        }
                     }
 
                     return [
+                        'id' => $document->id,
                         'document_type' => $document->document_type,
                         'file_name' => $document->file_name,
                         'uploaded_at' => $document->uploaded_at,
                         'file_size' => $document->file_size ?? $actualFileSize,
                         'mime_type' => $document->mime_type ?? $actualMimeType,
-                        'file_url' => $fileUrl,
+                        'file_url' => $this->generateFileUrl($document->file_name, $document->id),
                         'file_exists' => $fileExists,
-                        'file_path' => $fileExists ? basename(dirname($filePath)) . '/' . basename($filePath) : null, // For debugging
+                        'storage_type' => $storageType,
+                        'file_path' => $diskFileExists ? basename(dirname($filePath)) . '/' . basename($filePath) : null
                     ];
                 })->toArray();
             }
@@ -4733,10 +5205,69 @@ class JobController extends Controller
                 ], 404);
             }
 
+            // PRODUCTION FIX: Critical payment validation at print stage
+            Log::info('Starting payment validation at print stage', [
+                'user_id' => $userId,
+                'job_id' => $jobId,
+                'application_id' => $applicationStatus->application_id,
+                'current_payment_amount' => $applicationStatus->payment_amount,
+                'current_stage' => $applicationStatus->stage
+            ]);
+
+            // Force payment amount validation and fix if needed
+            $validatedPaymentAmount = $this->validateAndFixPaymentAmount($userId, $jobId, true);
+            
+            if ($validatedPaymentAmount === false || $validatedPaymentAmount <= 0) {
+                Log::critical('Payment amount validation failed at print stage', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId,
+                    'application_id' => $applicationStatus->application_id
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Payment amount validation failed. Please contact support.',
+                    'error_code' => 'PAYMENT_VALIDATION_FAILED'
+                ], 400);
+            }
+
+            // Refresh application status to get updated payment amount
+            $applicationStatus->refresh();
+
+            // Validate that payment amount is not zero before allowing print
+            if ($applicationStatus->payment_amount <= 0) {
+                Log::error('Payment amount is still zero after validation at print stage', [
+                    'user_id' => $userId,
+                    'job_id' => $jobId,
+                    'application_id' => $applicationStatus->application_id,
+                    'payment_amount' => $applicationStatus->payment_amount
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Payment amount is invalid. Please contact support to resolve this issue.',
+                    'error_code' => 'INVALID_PAYMENT_AMOUNT',
+                    'debug_info' => [
+                        'payment_amount' => $applicationStatus->payment_amount,
+                        'application_id' => $applicationStatus->application_id
+                    ]
+                ], 400);
+            }
+
+            Log::info('Payment validation successful at print stage', [
+                'user_id' => $userId,
+                'job_id' => $jobId,
+                'application_id' => $applicationStatus->application_id,
+                'validated_payment_amount' => $applicationStatus->payment_amount
+            ]);
+
             if ($applicationStatus->stage < JobAppliedStatus::STAGES['payment']) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Payment must be completed before generating printable application'
+                    'message' => 'Payment must be completed before generating printable application',
+                    'required_payment_amount' => $applicationStatus->payment_amount,
+                    'current_stage' => $applicationStatus->stage,
+                    'payment_status' => $applicationStatus->payment_status
                 ], 400);
             }
 
@@ -4839,12 +5370,24 @@ class JobController extends Controller
     }
 
     /**
+     * Get MIME type based on file extension
+     * 
+     * @param string $extension
+     * @return string
+     */
+    private function getMimeType($extension)
+    {
+        return $this->detectMimeType($extension);
+    }
+
+    /**
      * Generate file URL for uploaded documents
      * 
      * @param string $filename
+     * @param int|null $documentId Optional document ID for database-stored files
      * @return string|null
      */
-    private function generateFileUrl($filename)
+    private function generateFileUrl($filename, $documentId = null)
     {
         if (!$filename) {
             return null;
@@ -4853,9 +5396,13 @@ class JobController extends Controller
         // Use the API endpoint for serving files
         $baseUrl = config('app.url');
         
-        // URL encode the filename to handle special characters and spaces
-        $encodedFilename = urlencode($filename);
+        // If document ID is provided, use it for database-stored files
+        if ($documentId) {
+            return "{$baseUrl}/api/files/{$documentId}";
+        }
         
+        // For disk-stored files, use filename
+        $encodedFilename = urlencode($filename);
         return "{$baseUrl}/api/files/{$encodedFilename}";
     }
 
@@ -4871,17 +5418,30 @@ class JobController extends Controller
             return null;
         }
 
-        // Possible storage paths where files might be located
-        $possiblePaths = [
-            storage_path('app/uploads/' . $filename),
-            storage_path('app/public/uploads/' . $filename),
-            public_path('uploads/' . $filename),
-            storage_path('uploads/' . $filename),
+        // Base storage directories to search
+        $baseDirectories = [
+            storage_path('app/uploads/'),
+            storage_path('app/public/uploads/'),
+            public_path('uploads/'),
+            storage_path('uploads/'),
         ];
 
-        foreach ($possiblePaths as $path) {
-            if (file_exists($path)) {
-                return $path;
+        foreach ($baseDirectories as $baseDir) {
+            // First check if file exists directly in base directory
+            $directPath = $baseDir . $filename;
+            if (file_exists($directPath)) {
+                return $directPath;
+            }
+
+            // Then search in subdirectories (timestamp-based folders)
+            if (is_dir($baseDir)) {
+                $subdirectories = glob($baseDir . '*/');
+                foreach ($subdirectories as $subDir) {
+                    $subPath = $subDir . $filename;
+                    if (file_exists($subPath)) {
+                        return $subPath;
+                    }
+                }
             }
         }
 
@@ -4892,10 +5452,103 @@ class JobController extends Controller
      * Serve file from storage - API endpoint to serve uploaded files
      * 
      * @param Request $request
-     * @param string $filename
+     * @param string $identifier Can be either filename or document ID
      * @return \Illuminate\Http\Response
      */
-    public function serveFile(Request $request, $filename)
+    public function serveFile(Request $request, $identifier)
+    {
+        try {
+            // Check if identifier is a document ID (numeric)
+            if (is_numeric($identifier)) {
+                return $this->serveFileFromDatabase($identifier);
+            }
+            
+            // Handle as filename
+            return $this->serveFileFromDisk($identifier);
+
+        } catch (\Exception $e) {
+            Log::error('Error serving file: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error serving file',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Serve file from database (base64 stored)
+     */
+    private function serveFileFromDatabase($documentId)
+    {
+        try {
+            $document = JobDocumentUpload::find($documentId);
+            
+            if (!$document || !$document->file_base64) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Document not found in database',
+                    'document_id' => $documentId
+                ], 404);
+            }
+
+            // Extract base64 data and MIME type from data URL
+            if (!preg_match('/data:([^;]+);base64,(.*)/', $document->file_base64, $matches)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid file data format'
+                ], 400);
+            }
+
+            $mimeType = $matches[1];
+            $base64Data = $matches[2];
+            
+            // Decode base64 data
+            $fileContent = base64_decode($base64Data);
+            
+            if ($fileContent === false) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to decode file data'
+                ], 400);
+            }
+
+            // Set headers
+            $headers = [
+                'Content-Type' => $mimeType,
+                'Content-Length' => strlen($fileContent),
+                'Cache-Control' => 'public, max-age=86400',
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
+            ];
+
+            // Set content disposition based on file type
+            $isImage = str_starts_with($mimeType, 'image/');
+            if ($isImage) {
+                $headers['Content-Disposition'] = 'inline; filename="' . $document->file_name . '"';
+            } else {
+                $headers['Content-Disposition'] = 'attachment; filename="' . $document->file_name . '"';
+            }
+
+            return response($fileContent, 200, $headers);
+
+        } catch (\Exception $e) {
+            Log::error('Error serving file from database: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error serving file from database',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Serve file from disk storage
+     */
+    private function serveFileFromDisk($filename)
     {
         try {
             // Decode the filename from URL encoding
@@ -4927,7 +5580,7 @@ class JobController extends Controller
             if (!$filePath) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'File not found',
+                    'message' => 'File not found on disk',
                     'filename' => $decodedFilename
                 ], 404);
             }
@@ -4956,11 +5609,11 @@ class JobController extends Controller
             return response()->file($filePath, $headers);
 
         } catch (\Exception $e) {
-            Log::error('Error serving file: ' . $e->getMessage());
+            Log::error('Error serving file from disk: ' . $e->getMessage());
             
             return response()->json([
                 'success' => false,
-                'message' => 'Error serving file',
+                'message' => 'Error serving file from disk',
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -4981,5 +5634,71 @@ class JobController extends Controller
             'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
             'Access-Control-Max-Age' => '86400',
         ]);
+    }
+
+    /**
+     * Test endpoint to check file serving functionality
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function testFileServing(Request $request)
+    {
+        try {
+            $testResults = [];
+            
+            // Test files from your actual data
+            $testFiles = ['CEO_SIGN.jpg', 'id_card.jpg', 'notice3 (4).pdf'];
+            
+            foreach ($testFiles as $filename) {
+                $filePath = $this->findFileInStorage($filename);
+                $fileUrl = $this->generateFileUrl($filename);
+                
+                $testResults[] = [
+                    'filename' => $filename,
+                    'file_url' => $fileUrl,
+                    'file_exists' => $filePath !== null,
+                    'file_path' => $filePath,
+                    'encoded_filename' => urlencode($filename)
+                ];
+            }
+            
+            // Also check storage paths
+            $storagePaths = [
+                'storage/app/uploads/',
+                'storage/app/public/uploads/',
+                'public/uploads/',
+                'storage/uploads/',
+            ];
+            
+            $pathTests = [];
+            foreach ($storagePaths as $path) {
+                $fullPath = base_path($path);
+                $pathTests[] = [
+                    'path' => $path,
+                    'full_path' => $fullPath,
+                    'exists' => is_dir($fullPath),
+                    'files_count' => is_dir($fullPath) ? count(glob($fullPath . '*')) : 0
+                ];
+            }
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'File serving test results',
+                'route_exists' => true,
+                'base_url' => config('app.url'),
+                'test_files' => $testResults,
+                'storage_paths' => $pathTests,
+                'current_datetime' => now()
+            ], 200);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Test failed',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ], 500);
+        }
     }
 }

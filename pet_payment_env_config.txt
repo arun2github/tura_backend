@@ -1,0 +1,18 @@
+# Pet Dog Registration Payment Configuration
+# Add these variables to your .env file for Pet Dog Registration payment calculation
+
+# Basic Pet Dog Registration Fee (in INR)
+PET_DOG_REGISTRATION_FEE=500
+
+# Additional Vaccination Fee (if vaccination is pending)
+PET_VACCINATION_FEE=200
+
+# Pet Registration Certificate Processing Fee
+PET_CERTIFICATE_FEE=100
+
+# Instructions for .env file:
+# Copy the above variables to your main .env file and adjust the amounts as needed
+# Example:
+# PET_DOG_REGISTRATION_FEE=500
+# PET_VACCINATION_FEE=200
+# PET_CERTIFICATE_FEE=100

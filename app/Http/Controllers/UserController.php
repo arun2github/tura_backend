@@ -90,91 +90,248 @@ class UserController extends Controller
      *
      * @return \Illuminate\Http\JsonResponse
      */
-    public function register(Request $request)
-    {
-        try {
-            $validator = Validator::make($request->all(), [
-                // 'role' => 'required|string|between:2,10',
-                'firstname' => 'required|string|between:2,50',
-                'lastname' => 'required|string|between:2,50',
-                'ward_id' => 'required',
-                'locality' => 'required',
-                'dob' => 'required|date_format:Y-m-d',
-                'phone_no' => 'required|string|min:10',
-                'email' => 'required|string|email|max:100',
-                'password' => 'required|string|min:6',
-                'confirm_password' => 'required|same:password',
-            ]);
-            $userArray = array(
-                // 'role' => $request->role,
-                'firstname' => $request->firstname,
-                'lastname' => $request->lastname,
-                'ward_id' => $request->ward_id,
-                'locality' => $request->locality,
-                'dob' => $request->dob,
-                'phone_no' => $request->phone_no,
-                'email' => $request->email,
-                'password' => bcrypt($request->password),
-            );
+public function register(Request $request)
+{
+    try {
+        $validator = Validator::make($request->all(), [
+            'firstname' => 'required|string|between:2,50',
+            'lastname' => 'required|string|between:2,50',
+            'ward_id' => 'nullable', // ✅ optional
+            'locality' => 'nullable|string|max:255', // ✅ optional
+            'dob' => 'required|date_format:Y-m-d',
+            'phone_no' => 'required|string|min:10',
+            'email' => 'required|string|email|max:100',
+            'password' => 'required|string|min:6',
+            'confirm_password' => 'required|same:password',
+        ]);
 
-            if ($validator->fails()) {
-                return response()->json($validator->errors()->toJson(), 400);
-            }
+        if ($validator->fails()) {
+            return response()->json($validator->errors()->toJson(), 400);
+        }
 
-            $userObject = new User();
-            $user = $userObject->userEmailValidation($request->email);
+        $userArray = [
+            'firstname' => $request->firstname,
+            'lastname' => $request->lastname,
+            'ward_id' => $request->ward_id ?? null, // ✅ allow null
+            'locality' => $request->locality ?? null, // ✅ allow null
+            'dob' => $request->dob,
+            'phone_no' => $request->phone_no,
+            'email' => $request->email,
+            'password' => bcrypt($request->password),
+        ];
 
-            if ($user) {
+        $userObject = new User();
+        $existingUser = $userObject->userEmailValidation($request->email);
+
+        // Check if user already exists
+        if ($existingUser) {
+            if ($existingUser->verifyemail === 'active') {
                 throw new MunicipalBoardException("The email has already been taken", 401);
             }
 
-            $userDetail = $userObject->saveUserDetails($userArray);
+            if ($existingUser->verifyemail === 'inactive') {
+                $token = JWTAuth::fromUser($existingUser);
+                $emailSent = false;
+                $emailError = null;
 
-            $token = JWTAuth::fromUser($userDetail);
-            $emailSent = false;
-            $emailError = null;
-            
-            if($userDetail) {
                 try {
                     $emailSent = $this->sendMail($token, $request->email);
                 } catch (\Exception $e) {
                     $emailError = $e->getMessage();
-                    Log::error('Registration email failed during registration', [
-                        'user_id' => $userDetail->id,
+                    Log::error('Verification email resend failed for existing user', [
+                        'user_id' => $existingUser->id,
                         'email' => $request->email,
                         'error' => $emailError
                     ]);
                 }
+
+                Log::info('Resent verification email for existing unverified user', [
+                    'user_id' => $existingUser->id,
+                    'email' => $request->email,
+                    'email_sent' => $emailSent ? 'Yes' : 'No',
+                    'action' => 'duplicate_registration_prevented'
+                ]);
+
+                $responseMessage = 'User Successfully Registered';
+                $statusCode = 201;
+
+                if (!$emailSent && $emailError) {
+                    $responseMessage = 'User Registered Successfully, but verification email could not be sent. Please contact support to verify your account.';
+                    Log::warning('Existing user verification email resend failed', [
+                        'user_id' => $existingUser->id,
+                        'email' => $request->email,
+                        'error' => $emailError
+                    ]);
+                }
+
+                return response()->json([
+                    'status' => $emailSent ? 'success' : 'warning',
+                    'message' => $responseMessage,
+                    'user_id' => $existingUser->id,
+                    'email_sent' => $emailSent,
+                    'verification_required' => true,
+                    'email_error' => $emailSent ? null : 'SMTP Authentication Failed - Contact Administrator'
+                ], $statusCode);
             }
+        }
 
-            Log::info('Registered user Email : ' . 'Email Id :' . $request->email . ' Email Sent: ' . ($emailSent ? 'Yes' : 'No'));
+        // New User Registration
+        $userDetail = $userObject->saveUserDetails($userArray);
 
-            $responseMessage = 'User Successfully Registered';
-            $statusCode = 201;
-            
-            if (!$emailSent && $emailError) {
-                $responseMessage = 'User Registered Successfully, but verification email could not be sent. Please contact support to verify your account.';
-                Log::warning('User registered but email failed', [
+        $token = JWTAuth::fromUser($userDetail);
+        $emailSent = false;
+        $emailError = null;
+
+        if ($userDetail) {
+            try {
+                $emailSent = $this->sendMail($token, $request->email);
+            } catch (\Exception $e) {
+                $emailError = $e->getMessage();
+                Log::error('Registration email failed during registration', [
                     'user_id' => $userDetail->id,
                     'email' => $request->email,
                     'error' => $emailError
                 ]);
             }
+        }
+
+        Log::info('Registered new user Email : ' . $request->email . ' Email Sent: ' . ($emailSent ? 'Yes' : 'No'));
+
+        $responseMessage = 'User Successfully Registered';
+        $statusCode = 201;
+
+        if (!$emailSent && $emailError) {
+            $responseMessage = 'User Registered Successfully, but verification email could not be sent. Please contact support to verify your account.';
+            Log::warning('User registered but email failed', [
+                'user_id' => $userDetail->id,
+                'email' => $request->email,
+                'error' => $emailError
+            ]);
+        }
+
+        return response()->json([
+            'status' => $emailSent ? 'success' : 'warning',
+            'message' => $responseMessage,
+            'user_id' => $userDetail->id,
+            'email_sent' => $emailSent,
+            'verification_required' => true,
+            'email_error' => $emailSent ? null : 'SMTP Authentication Failed - Contact Administrator'
+        ], $statusCode);
+
+    } catch (MunicipalBoardException $exception) {
+        Log::error('Invalid User');
+        return $exception->message();
+    }
+}
+
+
+public function login(Request $request)
+{
+    try {
+        // ✅ Step 1: Validate input
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+            'password' => 'required|string|min:6',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json($validator->errors(), 400);
+        }
+
+        // ✅ Step 2: Check if user exists
+        $userObject = new User();
+        $user = $userObject->userEmailValidation($request->email);
+
+        if (!$user) {
+            Log::error('User not found during login', ['email' => $request->email]);
+            throw new MunicipalBoardException(
+                "We cannot find the user with that e-mail address. You need to register first.",
+                401
+            );
+        }
+
+        // ✅ Step 3: Check credentials
+        if (!$token = auth()->attempt($validator->validated())) {
+            throw new MunicipalBoardException("Invalid Credentials", 401);
+        }
+
+        // ✅ Step 4: Check if email is verified
+        if ($user->verifyemail === 'inactive') {
+            $token = Auth::fromUser($user);
+            $this->sendMail($token, $request->email);
 
             return response()->json([
-                'status' => $emailSent ? 'success' : 'warning',
-                'message' => $responseMessage,
-                'user_id' => $userDetail->id,
-                'email_sent' => $emailSent,
-                'verification_required' => true,
-                'email_error' => $emailSent ? null : 'SMTP Authentication Failed - Contact Administrator'
-            ], $statusCode);
-
-        } catch (MunicipalBoardException $exception) {
-            Log::error('Invalid User');
-            return $exception->message();
+                'status' => 211,
+                'message' => 'Email not verified. Verification link has been sent again.'
+            ], 211);
         }
+
+        // ✅ Step 5: Safely fetch locality and ward (both optional)
+        $locality = null;
+        $ward = null;
+
+        if (!empty($user->locality)) {
+            $locality = LocalityModel::select('id', 'ward_id', 'locality', 'status')
+                ->where('id', $user->locality)
+                ->first();
+        }
+
+        if (!empty($user->ward_id)) {
+            $ward = WardList::select('id', 'ward_no', 'status')
+                ->where('id', $user->ward_id)
+                ->first();
+        }
+
+        // ✅ Step 6: Build structured user details safely
+        $user_details = [
+            "firstname" => $user->firstname,
+            "lastname" => $user->lastname,
+            "dob" => $user->dob,
+            "email" => $user->email,
+            "phone_no" => $user->phone_no,
+            "ward" => $ward ? [
+                "id" => $ward->id,
+                "ward_no" => $ward->ward_no
+            ] : null,
+            "locality" => $locality ? [
+                "id" => $locality->id,
+                "name" => $locality->locality
+            ] : null
+        ];
+
+        // ✅ Step 7: Logging success
+        Log::info('User login successful', [
+            'email' => $request->email,
+            'user_id' => $user->id,
+            'has_ward' => $ward ? 'Yes' : 'No',
+            'has_locality' => $locality ? 'Yes' : 'No'
+        ]);
+
+        // ✅ Step 8: Return JSON response
+        return response()->json([
+            'status' => 'success',
+            'access_token' => $token,
+            'role' => $user->role,
+            'message' => 'Login successful',
+            'user_details' => $user_details
+        ], 200);
+
+    } catch (MunicipalBoardException $exception) {
+        Log::error('MunicipalBoardException in login', ['error' => $exception->getMessage()]);
+        return $exception->message();
+    } catch (\Exception $e) {
+        Log::error('Unexpected error in login', [
+            'email' => $request->email ?? 'unknown',
+            'error' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine()
+        ]);
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Something went wrong during login. Please try again later.'
+        ], 500);
     }
+}
 
     /**
      * Takes the POST request and user credentials checks if it correct,
@@ -182,65 +339,65 @@ class UserController extends Controller
      *
      * @return \Illuminate\Http\JsonResponse
      */
-    public function login(Request $request) {
-        try {
-            $validator = Validator::make($request->all(), [
-                'email' => 'required|email',
-                'password' => 'required|string|min:6',
-            ]);
+    // public function login(Request $request) {
+    //     try {
+    //         $validator = Validator::make($request->all(), [
+    //             'email' => 'required|email',
+    //             'password' => 'required|string|min:6',
+    //         ]);
 
-            if ($validator->fails()) {
-                return response()->json($validator->errors(), 400);
-            }
+    //         if ($validator->fails()) {
+    //             return response()->json($validator->errors(), 400);
+    //         }
 
-            $userObject = new User();
-            $user = $userObject->userEmailValidation($request->email);
-            if (!$user) {
-                Log::error('User failed to login.', ['id' => $request->email]);
-                throw new MunicipalBoardException("we can not find the user with that e-mail address You need to register first", 401);
-            }
+    //         $userObject = new User();
+    //         $user = $userObject->userEmailValidation($request->email);
+    //         if (!$user) {
+    //             Log::error('User failed to login.', ['id' => $request->email]);
+    //             throw new MunicipalBoardException("we can not find the user with that e-mail address You need to register first", 401);
+    //         }
 
-            if (!$token = auth()->attempt($validator->validated())) {
-                throw new MunicipalBoardException("Invalid Credentials", 401);
-            }
+    //         if (!$token = auth()->attempt($validator->validated())) {
+    //             throw new MunicipalBoardException("Invalid Credentials", 401);
+    //         }
             
-            if($user->verifyemail === 'inactive') {
-                $token = Auth::fromUser($user);
+    //         if($user->verifyemail === 'inactive') {
+    //             $token = Auth::fromUser($user);
 
-                $this->sendMail($token,$request->email);
+    //             $this->sendMail($token,$request->email);
 
-                return  response()->json([
-                    'status' => 211,
-                    'message' => 'Email Not verified'
-                ],211);
-            }
+    //             return  response()->json([
+    //                 'status' => 211,
+    //                 'message' => 'Email Not verified'
+    //             ],211);
+    //         }
 
-            Log::info('Login Success : ' . 'Email Id :' . $request->email);
-            $locality = LocalityModel::select('locality','id','ward_id','status')->where('id',$user->locality)->first();
-            $ward = WardList::select('ward_no')->where('id',$user->ward_id)->first();
+    //         Log::info('Login Success : ' . 'Email Id :' . $request->email);
+    //         $locality = LocalityModel::select('locality','id','ward_id','status')->where('id',$user->locality)->first();
+    //         $ward = WardList::select('ward_no')->where('id',$user->ward_id)->first();
 
-            $user_details = [
-                "firstname" => $user->firstname,
-                "lastname" => $user->lastname,
-                "dob" => $user->dob,
-                "email" => $user->email,
-                "phone_no" => $user->phone_no,
-                "locality" => $locality,
-                "ward" => $ward->ward_no
-            ];
+    //         $user_details = [
+    //             "firstname" => $user->firstname,
+    //             "lastname" => $user->lastname,
+    //             "dob" => $user->dob,
+    //             "email" => $user->email,
+    //             "phone_no" => $user->phone_no,
+    //             "locality" => $locality,
+    //             "ward" => $ward->ward_no
+    //         ];
             
-            return response()->json([
-                'status' => 'success',
-                'access_token' => $token,
-                'role' => $user->role,
-                'message' => 'Login successfull',
-                'user_details' => $user_details
-            ], 200);
-        } catch (MunicipalBoardException $exception) {
-            Log::error('Invalid User');
-            return $exception->message();
-        }
-    }
+    //         return response()->json([
+    //             'status' => 'success',
+    //             'access_token' => $token,
+    //             'role' => $user->role,
+    //             'message' => 'Login successfull',
+    //             'user_details' => $user_details
+    //         ], 200);
+    //     } catch (MunicipalBoardException $exception) {
+    //         Log::error('Invalid User');
+    //         return $exception->message();
+    //     }
+    // }
 
     public function logout() {
         // Check if the token is valid
@@ -648,6 +805,88 @@ class UserController extends Controller
         }
     }
     
+    /**
+     * Resend verification email for unverified users
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function resendVerificationEmail(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'email' => 'required|string|email|max:100',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json($validator->errors()->toJson(), 400);
+            }
+
+            $userObject = new User();
+            $user = $userObject->userEmailValidation($request->email);
+
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Email not found. Please register first.'
+                ], 404);
+            }
+
+            if ($user->verifyemail === 'active') {
+                return response()->json([
+                    'status' => 'info',
+                    'message' => 'Email is already verified. You can login now.'
+                ], 200);
+            }
+
+            // Generate new token and send verification email
+            $token = JWTAuth::fromUser($user);
+            $emailSent = false;
+            $emailError = null;
+            
+            try {
+                $emailSent = $this->sendMail($token, $request->email);
+            } catch (\Exception $e) {
+                $emailError = $e->getMessage();
+                Log::error('Resend verification email failed', [
+                    'user_id' => $user->id,
+                    'email' => $request->email,
+                    'error' => $emailError
+                ]);
+            }
+            
+            Log::info('Resend verification email request', [
+                'user_id' => $user->id,
+                'email' => $request->email,
+                'email_sent' => $emailSent ? 'Yes' : 'No'
+            ]);
+
+            $responseMessage = $emailSent 
+                ? 'Verification email has been resent successfully.' 
+                : 'Failed to resend verification email. Please try again later or contact support.';
+
+            return response()->json([
+                'status' => $emailSent ? 'success' : 'error',
+                'message' => $responseMessage,
+                'user_id' => $user->id,
+                'email_sent' => $emailSent,
+                'email_error' => $emailSent ? null : 'SMTP Authentication Failed - Contact Administrator'
+            ], $emailSent ? 200 : 500);
+
+        } catch (\Exception $e) {
+            Log::error('Resend verification email exception', [
+                'email' => $request->email ?? 'unknown',
+                'error' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Something went wrong. Please try again later.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     /**
      * Test email configuration and sending
      *

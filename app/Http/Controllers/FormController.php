@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
 use ZipArchive;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -1171,7 +1172,7 @@ class FormController extends Controller
                     $formsArray[$form['application_id']]['status'] = $request->stage == "consumer" ? $form['ceo_status'] : $form[$column];
                     $formsArray[$form['application_id']]['formNumber'] = $form['formNumber'];
                     $formsArray[$form['application_id']]['form_id'] = $form['formID'];
-                    if($form['formNumber'] == 5 || $form['formNumber'] == 7 || $form['formNumber'] == 6 || $form['formNumber'] == 8 || $form['formNumber'] == 10){
+                    if($form['formNumber'] == 0 || $form['formNumber'] == 5 || $form['formNumber'] == 7 || $form['formNumber'] == 6 || $form['formNumber'] == 8 || $form['formNumber'] == 10){
                         $formsArray[$form['application_id']]['payment'] = "Yes";
                     }else{
                         $formsArray[$form['application_id']]['payment'] = "No";
@@ -1477,20 +1478,230 @@ class FormController extends Controller
         }
     }
     
+    /**
+     * Generate Pet Dog Registration Certificate PDF
+     * Following the same pattern as other form certificate generation
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function generatePetDogCertificate(Request $request) {
+        try {
+            $validator = Validator::make($request->all(), [
+                'application_id' => 'required|string',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status' => "failed",
+                    'message' => 'Validation Failed',
+                    'errors' => $validator->errors()->toArray(),
+                ], 400);
+            }
+
+            $user = Auth::user();
+            if (!$user) {
+                throw new MunicipalBoardException("Invalid authorization token", 401);
+            }
+
+            // Get form master record
+            $formMaster = FormMasterTblModel::where('application_id', $request->application_id)->first();
+
+            if (!$formMaster) {
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Pet Dog Registration not found'
+                ], 404);
+            }
+
+            // Note: Pet Dog Registration is auto-approved, no payment verification required
+
+            // Get form entity data
+            $formEntities = FormEntityModel::where('form_id', $formMaster->id)->get();
+            $formData = [];
+            
+            foreach ($formEntities as $entity) {
+                if (in_array($entity->parameter, ['document_list'])) {
+                    $formData[$entity->parameter] = json_decode($entity->value, true);
+                } else {
+                    $formData[$entity->parameter] = $entity->value;
+                }
+            }
+
+            // Generate unique registration number
+            $registrationNumber = 'PDR-' . date('Y') . '-' . str_pad($formMaster->id, 4, '0', STR_PAD_LEFT);
+
+            // Get pet tag number from form data
+            $petTagNumber = $formData['pet_tag_number'] ?? 'TMB-1';
+
+            // Prepare data for certificate
+            $certificateData = array_merge($formData, [
+                'logo_path' => storage_path('app/public/email/turaLogo.png'),
+                'registration_number' => $registrationNumber,
+                'pet_tag_number' => $petTagNumber,
+                'application_id' => $request->application_id
+            ]);
+
+            // Generate PDF using DomPDF
+            $pdf = \PDF::loadView('pdf.pet_dog_certificate', $certificateData);
+            $pdf->setPaper('A4', 'portrait');
+            
+            // Set filename
+            $filename = 'pet_dog_certificate_' . $registrationNumber . '.pdf';
+            
+            // Return PDF as download
+            return $pdf->download($filename);
+
+        } catch (MunicipalBoardException $exception) {
+            Log::error('Pet Dog Certificate Generation Error');
+            return $exception->message();
+        }
+    }
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+    /**
+     * Takes the POST request for Pet Dog Registration,
+     * follows the same dynamic pattern as nacBirth
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function petDogRegistration(Request $request) {
+        try {
+            $validator = Validator::make($request->all(), [
+                'form_id' => 'required',
+                'owner_name' => 'required|string|between:2,50',
+                'owner_phone' => 'required|string|min:10|max:15',
+                'owner_email' => 'required|string|email|max:100',
+                'owner_address' => 'required|string|between:2,300',
+                'owner_aadhar_number' => 'required|string|between:10,15',
+                'dog_name' => 'required|string|between:2,50',
+                'dog_breed' => 'required|string|between:2,50',
+                'dog_age' => 'required|string',
+                'dog_color' => 'required|string|between:2,50',
+                'dog_gender' => 'required|string',
+                'dog_weight' => 'required|string|between:1,10',
+                'vaccination_status' => 'required|string',
+                'vaccination_date' => 'required|date_format:Y-m-d',
+                'veterinarian_name' => 'required|string|between:2,50',
+                'veterinarian_license' => 'required|string|between:2,50',
+                'upload_files' => 'required|array',
+                'document_list' => 'required|array',
+                'declaration' => 'required|string|between:2,500',
+            ]);
+
+            if ($validator->fails()) {
+                Log::error( $validator->errors()->toArray());
+                return response()->json([
+                    'status' => "failed",
+                    'message' => 'Validation Failed',
+                    'errors' => $validator->errors()->toArray(),
+                ], 400);
+            }
+            Log::error(json_encode($request->all()));
+
+            $user = Auth::user();
+            if (!$user) {
+                throw new MunicipalBoardException("Invalid authorization token", 401);
+            }
+            
+            // Generate auto-incremented pet tag number
+            $lastPetRegistration = FormMasterTblModel::where('form_id', $request->form_id)
+                ->orderBy('id', 'desc')
+                ->first();
+            
+            $petTagNumber = 1;
+            if ($lastPetRegistration) {
+                // Extract the last pet tag number and increment it
+                $lastFormData = FormEntityModel::where('form_id', $lastPetRegistration->id)
+                    ->where('parameter', 'pet_tag_number')
+                    ->first();
+                
+                if ($lastFormData && $lastFormData->value) {
+                    $lastNumber = (int) str_replace('TMB-', '', $lastFormData->value);
+                    $petTagNumber = $lastNumber + 1;
+                }
+            }
+            
+            $petTag = 'TMB-' . $petTagNumber;
+            $app_id = "TMBPETDOG".date("Ymdhis");
+            
+            // Create form master record with auto-approval (no approval needed)
+            $form_data = [
+                'form_id' => $request->form_id,
+                'application_id' => $app_id,
+                'inserted_by' => $user->id,
+                'employee_status' => 'Approved',
+                'ceo_status' => 'Approved'
+            ];
+            $form_id = FormMasterTblModel::insertGetId($form_data);
+
+            $formData = [];
+            $fileName = date('Ymdhis');
+            $file_path = 'uploads/' . $fileName;
+            foreach($request->all() as $key => $req){
+                if($key == "upload_files" || $key == "form_id"){
+                    if ($request->hasFile('upload_files')) {
+                        $files = $request->file('upload_files');
+                        if (is_array($files)) {
+                            foreach ($files as $file) {
+                                $filePath = $file->store($file_path, 'public');
+                                // Save the $filePath to the database as needed
+                            }
+                        } else {
+                            // Handle the case where only a single file is uploaded
+                            $filePath = $files->store($file_path, 'public');
+                            // Save the $filePath to the database as needed
+                        }
+                    }
+                }else{
+                    $value = is_array($req) ? json_encode($req) : $req;
+                    $formData[] = [
+                        'parameter' => $key,
+                        'value' => $value,
+                        'form_id' => $form_id
+                    ];
+                }
+            }
+            $formData[] = [
+                'parameter' => 'upload_file_path',
+                'value' => $fileName,
+                'form_id' => $form_id
+            ];
+            
+            // Add auto-generated pet tag number
+            $formData[] = [
+                'parameter' => 'pet_tag_number',
+                'value' => $petTag,
+                'form_id' => $form_id
+            ];
+            
+            // Insert all form data at once
+            FormEntityModel::insert($formData);
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Pet Dog Registration submitted successfully',
+                'application_id' => $app_id,
+                'pet_tag_number' => $petTag,
+                'note' => 'No approval required - Registration is automatically approved'
+            ], 200);
+        } catch (MunicipalBoardException $exception) {
+            Log::error('Pet Dog Registration Form Error');
+            return $exception->message();
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }

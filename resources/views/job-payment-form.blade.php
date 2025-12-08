@@ -180,7 +180,7 @@
             </div>
             
             <form class="payment-form" action="https://www.sbiepay.sbi/secure/AggregatorHostedListener" method="post" id="paymentForm">
-                <input type="hidden" name="EncData" value="{{ $encryptedData }}" />
+                <input type="hidden" name="EncryptTrans" value="{{ $encryptedData }}" />
                 <input type="hidden" name="merchIdVal" value="1003253" />
                 
                 <button type="submit" class="pay-button" id="payButton">

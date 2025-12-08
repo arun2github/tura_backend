@@ -1,0 +1,770 @@
+{
+	"info": {
+		"_postman_id": "pet-dog-registration-api-collection",
+		"name": "Pet Dog Registration API - Tura Municipal Board",
+		"description": "Complete API collection for Pet Dog Registration system implementation.\n\nBase URL: https://laravelv2.turamunicipalboard.com/api\nLocal URL: http://127.0.0.1:8000/api\n\nRegistration Process:\n1. User Authentication (Login/Register)\n2. Submit Pet Dog Registration Application\n3. Upload Required Documents\n4. Payment Processing\n5. Application Approval\n6. Certificate Generation\n\nFees:\n- Registration Fee: Rs. 50/-\n- Metal Tag: Rs. 200/-\n- Total: Rs. 250/-\n\nStipulated Time: 2 Days\n\nNote: Registration is for dogs completing 3+ months only.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "User Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.status && response.data && response.data.access_token) {",
+									"        pm.environment.set('jwt_token', response.data.access_token);",
+									"        pm.test('Login successful and token saved', function () {",
+									"            pm.expect(response.status).to.be.true;",
+									"        });",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"john.doe@example.com\",\n    \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Registration",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.data && response.data.access_token) {",
+									"        pm.environment.set('jwt_token', response.data.access_token);",
+									"        pm.test('Registration successful and token saved', function () {",
+									"            pm.expect(response.data.access_token).to.exist;",
+									"        });",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"firstname\": \"John\",\n    \"lastname\": \"Doe\",\n    \"email\": \"john.doe@example.com\",\n    \"password\": \"password123\",\n    \"confirm_password\": \"password123\",\n    \"phone_no\": \"9876543210\",\n    \"dob\": \"1990-01-01\",\n    \"ward_id\": \"1\",\n    \"locality\": \"Chandmary\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/register",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"register"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Pet Dog Registration",
+			"item": [
+				{
+					"name": "Submit Pet Dog Registration Application",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.status && response.application_id) {",
+									"        pm.environment.set('application_id', response.application_id);",
+									"        pm.test('Application submitted successfully', function () {",
+									"            pm.expect(response.status).to.be.true;",
+									"            pm.expect(response.application_id).to.exist;",
+									"            pm.expect(response.total_fee).to.equal(250);",
+									"        });",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner_name\": \"John Doe\",\n    \"identity_proof_type\": \"aadhar\",\n    \"identity_proof_number\": \"123456789012\",\n    \"phone_number\": \"+91 9876543210\",\n    \"email\": \"john.doe@example.com\",\n    \"dog_name\": \"Buddy\",\n    \"dog_breed\": \"Golden Retriever\",\n    \"address\": \"House No. 123, Main Street, Tura, Meghalaya - 794001\",\n    \"identity_proof_document\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwA/wAA\",\n    \"vaccination_card_document\": \"data:application/pdf;base64,JVBERi0xLjMKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvQ29udGVudHMgNCAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA0NCA+PgpzdHJlYW0KQlQKL0YxIDEyIFRmCjEwMCA3MDAgVGQKKFRlc3QgVmFjY2luYXRpb24gQ2FyZCkgVGoKRVQKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAxNzQgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA1IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoyNjgKJSVFT0Y=\",\n    \"dog_photo_document\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwA/wAA\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/submit",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Pet Dog Applications (Consumer)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"stage\": \"consumer\",\n    \"page\": 1,\n    \"limit\": 10,\n    \"search\": \"\",\n    \"status\": \"\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/getAllApplications",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"getAllApplications"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Pet Dog Applications (Employee)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"stage\": \"employee\",\n    \"page\": 1,\n    \"limit\": 10,\n    \"search\": \"\",\n    \"status\": \"pending\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/getAllApplications",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"getAllApplications"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Pet Dog Applications (CEO)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"stage\": \"ceo\",\n    \"page\": 1,\n    \"limit\": 10,\n    \"search\": \"\",\n    \"status\": \"pending\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/getAllApplications",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"getAllApplications"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Application Details",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"application_id\": \"{{application_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/getDetails",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"getDetails"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Payment Status (Success)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.test('Payment updated successfully', function () {",
+									"        pm.expect(response.status).to.be.true;",
+									"        pm.expect(response.data.payment_status).to.equal('paid');",
+									"        pm.expect(response.data.status).to.equal('approved');",
+									"        pm.expect(response.data.metal_tag_number).to.exist;",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"application_id\": \"{{application_id}}\",\n    \"payment_status\": \"paid\",\n    \"transaction_id\": \"TXN{{$timestamp}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/updatePayment",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"updatePayment"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Payment Status (Failed)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"application_id\": \"{{application_id}}\",\n    \"payment_status\": \"failed\",\n    \"transaction_id\": \"TXN{{$timestamp}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/updatePayment",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"updatePayment"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Search and Filters",
+			"item": [
+				{
+					"name": "Search by Application ID",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"stage\": \"consumer\",\n    \"search\": \"PDR-2025-0001\",\n    \"page\": 1,\n    \"limit\": 10\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/getAllApplications",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"getAllApplications"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Search by Owner Name",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"stage\": \"employee\",\n    \"search\": \"John Doe\",\n    \"page\": 1,\n    \"limit\": 10\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/getAllApplications",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"getAllApplications"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Filter by Status - Pending",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"stage\": \"employee\",\n    \"status\": \"pending\",\n    \"page\": 1,\n    \"limit\": 10\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/getAllApplications",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"getAllApplications"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Filter by Status - Approved",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"stage\": \"consumer\",\n    \"status\": \"approved\",\n    \"page\": 1,\n    \"limit\": 10\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/getAllApplications",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"getAllApplications"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Error Scenarios",
+			"item": [
+				{
+					"name": "Submit Application Without Authentication",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "owner_name",
+									"value": "Test User",
+									"type": "text"
+								},
+								{
+									"key": "identity_proof_type",
+									"value": "aadhar",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/submit",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Application with Invalid Data",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"owner_name\": \"\",\n    \"identity_proof_type\": \"invalid_type\",\n    \"email\": \"invalid-email\",\n    \"identity_proof_document\": \"invalid_base64\",\n    \"vaccination_card_document\": \"\",\n    \"dog_photo_document\": \"\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/submit",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Details for Non-existent Application",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"application_id\": \"INVALID-APPLICATION-ID\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/getDetails",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"getDetails"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Invalid Stage in getAllApplications",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{jwt_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"stage\": \"invalid_stage\",\n    \"page\": 1,\n    \"limit\": 10\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/pet-dog/getAllApplications",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"pet-dog",
+								"getAllApplications"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://laravelv2.turamunicipalboard.com/api",
+			"type": "string"
+		},
+		{
+			"key": "local_url",
+			"value": "http://127.0.0.1:8000/api",
+			"type": "string"
+		}
+	]
+}

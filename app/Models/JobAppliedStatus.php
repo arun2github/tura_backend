@@ -37,11 +37,14 @@ class JobAppliedStatus extends Model
         'email',
         'payment_amount',
         'payment_status',
+        'payment_order_id', // Added for SBI ePay order tracking
+        'payment_transaction_id',
+        'payment_date',
+        'payment_request_body', // Added for storing SBI ePay request parameters
+        'payment_response_body', // Added for storing SBI ePay response data
         'email_sent',
         'priority',
         'category_applied',
-        'payment_transaction_id',
-        'payment_date',
         'email_sent_at',
         'job_applied_email_sent',
         'payment_confirmation_email_sent',

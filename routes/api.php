@@ -8,6 +8,8 @@ use App\Http\Controllers\ForgotPasswordController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\JobController;
 use App\Http\Controllers\JobPaymentController;
+use App\Http\Controllers\Api\DynamicPetDogController;
+use App\Http\Controllers\Api\AdmitCardController;
 
 
 /*
@@ -36,6 +38,7 @@ Route::group(['middleware' => 'api'], function() {
     Route::post('changePassword', [UserController::class, 'changePassword']);
     
     Route::get('/verifyEmail/{token}', [UserController::class, 'verifyEmail']);
+    Route::post('resendVerificationEmail', [UserController::class, 'resendVerificationEmail']); // Resend verification email
     Route::post('testEmail', [UserController::class, 'testEmail']); // Test email functionality
     Route::post('manualVerifyEmail', [UserController::class, 'manualVerifyEmail']); // Manual email verification for admin
     
@@ -62,7 +65,8 @@ Route::group(['middleware' => 'api'], function() {
     
     
     Route::post('deathCert', [FormController::class, 'deathCertificate']);
-    Route::post('birthCert', [FormController::class, 'birthCertificate']);
+    Route::post('petDogRegistration', [DynamicPetDogController::class, 'submitRegistration']);
+    Route::post('generatePetDogCertificate', [FormController::class, 'generatePetDogCertificate']);
     
     Route::post('submitForm', [FormController::class, 'approvedOrRejectForm']);
     
@@ -72,6 +76,9 @@ Route::group(['middleware' => 'api'], function() {
     Route::get('/download/{filename}', [FormController::class, 'downloadFile']);
     
     Route::post('/successData', [PaymentController::class, 'successData']);
+    
+    // Job Payment success/failure routes (same pattern as PaymentController)
+    Route::post('/job-successData', [JobPaymentController::class, 'successData']);
     
     // Job Posting APIs - All require JWT authentication
     Route::middleware('auth')->group(function () {
@@ -111,20 +118,35 @@ Route::group(['middleware' => 'api'], function() {
         Route::post('generateApplicationIdAndSendEmail', [JobController::class, 'generateApplicationIdAndSendEmail']);
         Route::post('sendPaymentConfirmationEmail', [JobController::class, 'sendPaymentConfirmationEmail']);
         
-        // Job Payment APIs
-        Route::post('job-payment/initiate', [JobPaymentController::class, 'initiatePayment']);
-        Route::get('job-payment/status/{application_id}', [JobPaymentController::class, 'getPaymentStatus']);
+        // PRODUCTION FIX: Bulk payment amount fix for existing applications
+        Route::post('bulkFixZeroPaymentAmounts', [JobController::class, 'bulkFixZeroPaymentAmounts']);
     });
-    
-    // Job Payment Gateway Routes (No authentication required for gateway callbacks)
-    Route::get('job-payment-form', [JobPaymentController::class, 'showPaymentForm']);
-    Route::post('job-payment/success', [JobPaymentController::class, 'handlePaymentSuccess']);
-    Route::post('job-payment/failure', [JobPaymentController::class, 'handlePaymentFailure']);
     
     // File Serving Routes (No authentication required for file access)
     Route::get('files/{filename}', [JobController::class, 'serveFile'])->name('api.files.serve');
     Route::options('files/{filename}', [JobController::class, 'serveFileOptions'])->name('api.files.options');
+    
+    // Admit Card API Routes
+    Route::post('admit-card/verify', [AdmitCardController::class, 'verify']);
+    Route::get('admit-card/download/{admit_no}', [AdmitCardController::class, 'download']);
+    
+    // Test route for Flutter Web debugging
+    Route::get('test-admit-card', function () {
+        return response()->json([
+            'status' => true,
+            'message' => 'Admit Card API is working',
+            'timestamp' => now(),
+            'endpoints' => [
+                'verify' => url('/api/admit-card/verify'),
+                'download' => url('/api/admit-card/download/{admit_no}')
+            ]
+        ]);
+    });
 });
+
+// Job Payment Routes (handled in web routes - keep only callback in API)
+// The web route '/job-payment/{id}' is defined in routes/web.php and maps to JobPaymentController@payment
+
 Route::post('command', [UserController::class, 'commandRun']);
 
 Route::get('/test-db', function () {

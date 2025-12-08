@@ -1,0 +1,52 @@
+{
+	"id": "pet-dog-registration-environment",
+	"name": "Pet Dog Registration Environment",
+	"values": [
+		{
+			"key": "base_url",
+			"value": "https://laravelv2.turamunicipalboard.com/api",
+			"enabled": true
+		},
+		{
+			"key": "local_url", 
+			"value": "http://127.0.0.1:8000/api",
+			"enabled": true
+		},
+		{
+			"key": "jwt_token",
+			"value": "",
+			"enabled": true
+		},
+		{
+			"key": "application_id",
+			"value": "",
+			"enabled": true
+		},
+		{
+			"key": "user_email",
+			"value": "john.doe@example.com",
+			"enabled": true
+		},
+		{
+			"key": "user_password",
+			"value": "password123",
+			"enabled": true
+		},
+		{
+			"key": "owner_name",
+			"value": "John Doe",
+			"enabled": true
+		},
+		{
+			"key": "dog_name",
+			"value": "Buddy",
+			"enabled": true
+		},
+		{
+			"key": "dog_breed",
+			"value": "Golden Retriever",
+			"enabled": true
+		}
+	],
+	"_postman_variable_scope": "environment"
+}

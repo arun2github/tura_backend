@@ -1,0 +1,310 @@
+{
+	"info": {
+		"_postman_id": "admit-card-api-collection",
+		"name": "Tura Municipal Admit Card API",
+		"description": "API collection for testing admit card verification and download endpoints",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Test API Connection",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/test-admit-card",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"test-admit-card"
+					]
+				},
+				"description": "Test endpoint to verify API connectivity and server status"
+			},
+			"response": []
+		},
+		{
+			"name": "Verify Admit Card",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"application_id\": \"APP123456\",\n  \"email\": \"test@example.com\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/admit-card/verify",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"admit-card",
+						"verify"
+					]
+				},
+				"description": "Verify admit card using application_id and email. Returns candidate details and download URL if valid."
+			},
+			"response": [
+				{
+					"name": "Success Response",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"application_id\": \"APP123456\",\n  \"email\": \"test@example.com\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/admit-card/verify",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"admit-card",
+								"verify"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"status\": true,\n  \"message\": \"Record Found\",\n  \"application_id\": \"APP123456\",\n  \"roll_number\": \"ROLL001\",\n  \"full_name\": \"John Doe Test\",\n  \"download_url\": \"http://127.0.0.1:8000/api/admit-card/download/ADMIT001\"\n}"
+				},
+				{
+					"name": "Not Found Response",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"application_id\": \"INVALID123\",\n  \"email\": \"invalid@example.com\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/admit-card/verify",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"admit-card",
+								"verify"
+							]
+						}
+					},
+					"status": "Not Found",
+					"code": 404,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"status\": false,\n  \"message\": \"Invalid Application ID or Email\"\n}"
+				}
+			]
+		},
+		{
+			"name": "Download Admit Card PDF",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/pdf",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/admit-card/download/{{admit_no}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"admit-card",
+						"download",
+						"{{admit_no}}"
+					]
+				},
+				"description": "Download admit card PDF using admit_no. Returns PDF file for download."
+			},
+			"response": []
+		},
+		{
+			"name": "Test Database Connection",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/test-db",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"test-db"
+					]
+				},
+				"description": "Test database connectivity endpoint"
+			},
+			"response": []
+		},
+		{
+			"name": "Verify Invalid Data",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"application_id\": \"INVALID123\",\n  \"email\": \"invalid@example.com\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/admit-card/verify",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"admit-card",
+						"verify"
+					]
+				},
+				"description": "Test verification with invalid data to check error handling"
+			},
+			"response": []
+		},
+		{
+			"name": "Verify Missing Fields",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"application_id\": \"APP123456\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/admit-card/verify",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"admit-card",
+						"verify"
+					]
+				},
+				"description": "Test validation by sending incomplete data (missing email field)"
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://127.0.0.1:8000/api",
+			"type": "string"
+		},
+		{
+			"key": "admit_no",
+			"value": "ADMIT001",
+			"type": "string"
+		}
+	]
+}

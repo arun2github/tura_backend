@@ -36,7 +36,7 @@ class PaymentController extends Controller
         $key = $_ENV['PAYMENT_KEY'];
         
         // List of valid form IDs for payment
-    $payment_form_ids = [5, 6, 7, 8,10];
+    $payment_form_ids = [0, 5, 6, 7, 8, 10]; // Added 0 for Pet Dog Registration
 
     // Retrieve the record with the specified application ID
     $data = FormMasterTblModel::where('application_id', $id)->first();
@@ -138,6 +138,9 @@ class PaymentController extends Controller
                     $amount = (int) str_replace(',', '', $matches[1]);
                 }
             }
+        }else if($data->form_id == 0){
+            // Pet Dog Registration - Fixed amount ₹250
+            $amount = 250;
         }else if($data->form_id == 10){
             $formEntity = FormEntityModel::where('parameter', 'requirementTypeOf')
                                           ->where('form_id', $data->id)

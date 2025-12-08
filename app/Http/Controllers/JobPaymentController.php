@@ -9,384 +9,132 @@ use Illuminate\Support\Facades\Validator;
 use App\Models\JobAppliedStatus;
 use App\Models\TuraJobPosting;
 use App\Models\JobPersonalDetail;
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
 
 /**
  * JobPaymentController
  * 
  * Handles payment processing for job applications using SBI ePay integration
+ * Exact copy of PaymentController logic adapted for job applications
  */
 class JobPaymentController extends Controller
 {
-    /**
-     * Initiate payment for job application
-     */
-    public function initiatePayment(Request $request)
-    {
-        try {
-            $validator = Validator::make($request->all(), [
-                'user_id' => 'required|integer',
-                'job_id' => 'required|integer',
-                'application_id' => 'required|string',
-            ]);
+    public function payment($id){
+        // Sample key and request parameter (same as PaymentController)
+        $key = $_ENV['PAYMENT_KEY'];
+        
+        // Get application record by application ID (instead of FormMasterTblModel)
+        $data = JobAppliedStatus::where('application_id', $id)->first();
 
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validator->errors()
-                ], 400);
-            }
-
-            $userId = $request->user_id;
-            $jobId = $request->job_id;
-            $applicationId = $request->application_id;
-
-            // Get application status
-            $applicationStatus = JobAppliedStatus::where([
-                'user_id' => $userId,
-                'job_id' => $jobId,
-                'application_id' => $applicationId
-            ])->first();
-
-            if (!$applicationStatus) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Application not found'
-                ], 404);
-            }
-
-            // Check if payment is already completed
-            if ($applicationStatus->payment_status === 'paid') {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Payment already completed for this application'
-                ], 400);
-            }
-
-            // Get job details for fee calculation
-            $jobPosting = TuraJobPosting::find($jobId);
-            if (!$jobPosting) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Job posting not found'
-                ], 404);
-            }
-
-            // Get personal details for category-based fee
-            $personalDetails = JobPersonalDetail::where([
-                'user_id' => $userId,
-                'job_id' => $jobId
-            ])->first();
-
-            if (!$personalDetails) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Personal details not found. Please complete your application first.'
-                ], 400);
-            }
-
-            // Calculate payment amount based on category
-            $paymentAmount = $this->calculatePaymentAmount($jobPosting, $personalDetails->category);
-
-            if ($paymentAmount <= 0) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Invalid payment amount calculated'
-                ], 400);
-            }
-
-            // Generate unique order ID
-            $orderID = $applicationId . '-' . time() . rand(1000, 9999);
-
-            // Prepare payment parameters for SBI ePay
-            $key = config('services.sbiepay.key', env('PAYMENT_KEY'));
-            $merchantId = config('services.sbiepay.merchant_id', '1003253');
-            $successUrl = config('app.url') . '/api/job-payment/success';
-            $failureUrl = config('app.url') . '/api/job-payment/failure';
-
-            $requestParameter = "{$merchantId}|DOM|IN|INR|{$paymentAmount}|Other|{$successUrl}|{$failureUrl}|SBIEPAY|{$orderID}|2|NB|ONLINE|ONLINE";
-
-            Log::info('Job Payment Request', [
-                'application_id' => $applicationId,
-                'order_id' => $orderID,
-                'amount' => $paymentAmount,
-                'request_parameter' => $requestParameter
-            ]);
-
-            // Update application status with payment details
-            $applicationStatus->update([
-                'payment_order_id' => $orderID,
-                'payment_amount' => $paymentAmount,
-                'payment_status' => 'pending', // Use 'pending' as per enum values
-                'updated_at' => now()
-            ]);
-
-            // Encrypt the data for SBI ePay
-            $encryptedData = $this->encrypt($requestParameter, $key);
-
+        // Check if the record exists (same logic as PaymentController)
+        if (!$data) {
             return response()->json([
-                'success' => true,
-                'message' => 'Payment initiated successfully',
-                'data' => [
-                    'order_id' => $orderID,
-                    'amount' => $paymentAmount,
-                    'encrypted_data' => $encryptedData,
-                    'payment_url' => config('app.url') . '/job-payment-form',
-                    'application_id' => $applicationId
-                ]
-            ], 200);
-
-        } catch (\Exception $e) {
-            Log::error('Error initiating job payment: ' . $e->getMessage());
-            Log::error('Stack trace: ' . $e->getTraceAsString());
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Error initiating payment',
-                'error' => $e->getMessage()
-            ], 500);
+                'status' => 'failed',
+                'message' => 'Invalid application ID.',
+            ], 404); // Return 404 if record is not found
         }
-    }
+        
+        // Check if application is complete (equivalent to approved status in PaymentController)
+        if ($data->stage < 6) { // Stage 6 is document upload complete
+            return response()->json([
+                'status' => 'failed',
+                'message' => 'Application is not complete yet.',
+            ], 404); // Return 404 if application is not complete
+        }
 
-    /**
-     * Show payment form
-     */
-    public function showPaymentForm(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'order_id' => 'required|string',
+        // Check if payment is already completed
+        if ($data->payment_status === 'paid') {
+            return response()->json([
+                'status' => 'failed',
+                'message' => 'Payment already completed for this application.',
+            ], 404);
+        }
+
+        // Get job details for fee calculation (equivalent to form entity logic)
+        $jobPosting = TuraJobPosting::find($data->job_id);
+        
+        if (!$jobPosting) {
+            return response()->json([
+                'status' => 'failed',
+                'message' => 'Job posting not found.',
+            ], 404);
+        }
+
+        // Get personal details for category-based fee (equivalent to form entity logic)
+        $personalDetails = JobPersonalDetail::where([
+            'user_id' => $data->user_id,
+            'job_id' => $data->job_id
+        ])->first();
+
+        if (!$personalDetails) {
+            return response()->json([
+                'status' => 'failed',
+                'message' => 'Personal details not found.',
+            ], 404);
+        }
+
+        // Calculate payment amount based on category (same variable name as PaymentController)
+        // HARDCODED FOR TESTING: Set to ₹1 for production payment testing
+       // $this->calculatePaymentAmount($jobPosting, $personalDetails->category);
+       
+        $amount = $this->calculatePaymentAmount($jobPosting, $personalDetails->category);
+
+        
+        // Generate order ID (same logic as PaymentController)
+        $orderID = $id.rand(00000,100000);
+        
+        // Create request parameter (same format as PaymentController)
+        $requestParameter  = "1003253|DOM|IN|INR|".$amount."|Other|https://laravelv2.turamunicipalboard.com/api/job-successData|https://laravelv2.turamunicipalboard.com/api/job-successData|SBIEPAY|".$orderID."|2|NB|ONLINE|ONLINE";
+        
+        Log::warning('Job payment encrypted data format', ['data' => $requestParameter]);
+        
+        // Update application status with payment details (equivalent to PaymentModel in PaymentController)
+        $updateResult = $data->update([
+            'payment_order_id' => $orderID,
+            'payment_amount' => $amount,
+            'payment_status' => 'pending',
+            'payment_transaction_id' => null, // Will be set on success
+            'payment_date' => null, // Will be set on success
+            'payment_request_body' => $requestParameter, // Store request parameters like PaymentController
+            'payment_response_body' => null, // Will be set when payment callback is received
+            'updated_at' => now()
         ]);
 
-        if ($validator->fails()) {
-            return redirect()->back()->with('error', 'Invalid payment request');
-        }
+        Log::info('Payment setup - Database update', [
+            'application_id' => $id,
+            'order_id' => $orderID,
+            'amount' => $amount,
+            'update_result' => $updateResult,
+            'record_id' => $data->id,
+            'before_update' => [
+                'payment_order_id' => $data->payment_order_id,
+                'payment_status' => $data->payment_status,
+                'payment_amount' => $data->payment_amount
+            ]
+        ]);
 
-        $orderId = $request->order_id;
+        // Refresh the model to see if the update actually worked
+        $data->refresh();
+        
+        Log::info('Payment setup - After database update', [
+            'order_id' => $orderID,
+            'after_update' => [
+                'payment_order_id' => $data->payment_order_id,
+                'payment_status' => $data->payment_status,
+                'payment_amount' => $data->payment_amount
+            ]
+        ]);
 
-        // Get application record by order ID
-        $applicationStatus = JobAppliedStatus::where('payment_order_id', $orderId)->first();
-
-        if (!$applicationStatus || $applicationStatus->payment_status !== 'pending') {
-            return redirect()->back()->with('error', 'Payment session expired or invalid');
-        }
-
-        // Reconstruct request parameter for payment gateway
-        $key = config('services.sbiepay.key', env('PAYMENT_KEY'));
-        $merchantId = config('services.sbiepay.merchant_id', '1003253');
-        $successUrl = config('app.url') . '/api/job-payment/success';
-        $failureUrl = config('app.url') . '/api/job-payment/failure';
-
-        $requestParameter = "{$merchantId}|DOM|IN|INR|{$applicationStatus->payment_amount}|Other|{$successUrl}|{$failureUrl}|SBIEPAY|{$orderId}|2|NB|ONLINE|ONLINE";
+        // Encrypt the data (same logic as PaymentController)
         $encryptedData = $this->encrypt($requestParameter, $key);
 
-        return view('job-payment-form', compact('encryptedData', 'applicationStatus'));
+        // Return view (same as PaymentController but with job-payment-form view)
+        // Pass applicationStatus data that the view template expects
+        $applicationStatus = $data; // Use the JobAppliedStatus record
+        return view('job-payment-form', compact('encryptedData', 'requestParameter', 'applicationStatus'));
     }
 
     /**
-     * Handle successful payment callback
-     */
-    public function handlePaymentSuccess(Request $request)
-    {
-        try {
-            $key = config('services.sbiepay.key', env('PAYMENT_KEY'));
-
-            // Validate that the 'encData' is present in the request
-            if (!$request->has('encData')) {
-                Log::error('Missing encData parameter in job payment success callback');
-                return $this->redirectToFailure('Missing payment data');
-            }
-
-            // Retrieve encrypted data
-            $encData = $request->input('encData');
-
-            // Decrypt the data
-            try {
-                $data = $this->decrypt($encData, $key);
-            } catch (\Exception $e) {
-                Log::error('Job payment decryption failed', ['exception' => $e]);
-                return $this->redirectToFailure('Payment data decryption failed');
-            }
-
-            // Validate the decrypted data
-            $explode = explode("|", $data);
-
-            if (count($explode) < 4) {
-                Log::warning('Invalid job payment decrypted data format', ['data' => $data]);
-                return $this->redirectToFailure('Invalid payment response format');
-            }
-
-            // Extract payment details from decrypted data
-            $orderId = $explode[0];
-            $status = $explode[2];
-            $amount = $explode[3];
-
-            Log::info('Job Payment Callback Data', [
-                'order_id' => $orderId,
-                'status' => $status,
-                'amount' => $amount,
-                'response' => $data
-            ]);
-
-            // Get application record by order ID
-            $applicationStatus = JobAppliedStatus::where('payment_order_id', $orderId)->first();
-
-            if (!$applicationStatus) {
-                Log::error('Job application record not found', ['order_id' => $orderId]);
-                return $this->redirectToFailure('Payment record not found');
-            }
-
-            // Perform double verification
-            $doubleVerification = $this->doubleVerification($orderId, $amount);
-
-            // Check if the double verification failed
-            if ($doubleVerification['status'] != "success") {
-                $this->updatePaymentStatus($applicationStatus, 'failed', $data, null);
-
-                Log::error('Job payment double verification failed', [
-                    'order_id' => $orderId,
-                    'response' => $doubleVerification
-                ]);
-
-                return $this->redirectToFailure('Payment verification failed');
-            }
-
-            // Parse double verification response
-            $explodeDoubleVeri = explode("|", $doubleVerification['data']);
-
-            // Check payment status
-            if ($status == "SUCCESS" || (count($explodeDoubleVeri) >= 3 && trim($explodeDoubleVeri[2]) == "SUCCESS")) {
-                // Payment successful
-                $transactionId = isset($explode[1]) ? $explode[1] : $orderId;
-                
-                $this->updatePaymentStatus($applicationStatus, 'paid', $data, $transactionId);
-
-                // Send payment confirmation email
-                $this->sendPaymentConfirmationEmail($applicationStatus);
-
-                Log::info('Job payment successful', [
-                    'order_id' => $orderId,
-                    'application_id' => $applicationStatus->application_id,
-                    'transaction_id' => $transactionId
-                ]);
-
-                return $this->redirectToSuccess($applicationStatus->application_id);
-
-            } else {
-                // Payment failed
-                $this->updatePaymentStatus($applicationStatus, 'failed', $data, null);
-
-                Log::info('Job payment failed', [
-                    'order_id' => $orderId,
-                    'status' => $status,
-                    'data' => $data
-                ]);
-
-                return $this->redirectToFailure('Payment was not successful');
-            }
-
-        } catch (\Exception $e) {
-            Log::error('Error handling job payment success: ' . $e->getMessage());
-            Log::error('Stack trace: ' . $e->getTraceAsString());
-
-            return $this->redirectToFailure('Payment processing error');
-        }
-    }
-
-    /**
-     * Handle failed payment callback
-     */
-    public function handlePaymentFailure(Request $request)
-    {
-        try {
-            $key = config('services.sbiepay.key', env('PAYMENT_KEY'));
-
-            if ($request->has('encData')) {
-                $encData = $request->input('encData');
-                $data = $this->decrypt($encData, $key);
-                $explode = explode("|", $data);
-
-                if (count($explode) >= 1) {
-                    $orderId = $explode[0];
-                    
-                    $applicationStatus = JobAppliedStatus::where('payment_order_id', $orderId)->first();
-                    if ($applicationStatus) {
-                        $this->updatePaymentStatus($applicationStatus, 'failed', $data, null);
-                    }
-
-                    Log::info('Job payment failure callback', [
-                        'order_id' => $orderId,
-                        'data' => $data
-                    ]);
-                }
-            }
-
-            return $this->redirectToFailure('Payment was cancelled or failed');
-
-        } catch (\Exception $e) {
-            Log::error('Error handling job payment failure: ' . $e->getMessage());
-            return $this->redirectToFailure('Payment processing error');
-        }
-    }
-
-    /**
-     * Get payment status for an application
-     */
-    public function getPaymentStatus(Request $request)
-    {
-        try {
-            $validator = Validator::make($request->all(), [
-                'application_id' => 'required|string',
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validator->errors()
-                ], 400);
-            }
-
-            $applicationId = $request->application_id;
-
-            // Get application status
-            $applicationStatus = JobAppliedStatus::where('application_id', $applicationId)->first();
-
-            if (!$applicationStatus) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Application not found'
-                ], 404);
-            }
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Payment status retrieved successfully',
-                'data' => [
-                    'application_id' => $applicationId,
-                    'payment_status' => $applicationStatus->payment_status,
-                    'payment_amount' => $applicationStatus->payment_amount,
-                    'payment_date' => $applicationStatus->payment_date,
-                    'transaction_id' => $applicationStatus->payment_transaction_id,
-                    'order_id' => $applicationStatus->payment_order_id,
-                    'payment_confirmation_email_sent' => $applicationStatus->payment_confirmation_email_sent
-                ]
-            ], 200);
-
-        } catch (\Exception $e) {
-            Log::error('Error getting job payment status: ' . $e->getMessage());
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Error retrieving payment status',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Calculate payment amount based on job and category
+     * Calculate payment amount based on job and category (equivalent to PaymentController fee calculation)
      */
     private function calculatePaymentAmount($jobPosting, $category)
     {
@@ -404,249 +152,14 @@ class JobPaymentController extends Controller
                 return (float) $jobPosting->fee_general;
         }
     }
-
-    /**
-     * Update payment status in tura_job_applied_status table
-     */
-    private function updatePaymentStatus($applicationStatus, $status, $responseData, $transactionId = null)
-    {
-        $updateData = [
-            'payment_status' => $status,
-            'updated_at' => now()
-        ];
-
-        if ($status === 'paid') {
-            $updateData['payment_date'] = now();
-            $updateData['payment_transaction_id'] = $transactionId;
-            $updateData['stage'] = JobAppliedStatus::STAGES['print_application'];
-            $updateData['payment_confirmation_email_sent'] = 0; // Reset flag to send confirmation
-        }
-
-        $applicationStatus->update($updateData);
-
-        Log::info('Payment status updated', [
-            'application_id' => $applicationStatus->application_id,
-            'status' => $status,
-            'transaction_id' => $transactionId
-        ]);
-    }
-
-    /**
-     * Send payment confirmation email
-     */
-    private function sendPaymentConfirmationEmail($applicationStatus)
-    {
-        try {
-            // Get application details
-            $personalDetails = JobPersonalDetail::where([
-                'user_id' => $applicationStatus->user_id,
-                'job_id' => $applicationStatus->job_id
-            ])->first();
-            $jobPosting = TuraJobPosting::find($applicationStatus->job_id);
-
-            if (!$personalDetails || !$jobPosting) {
-                Log::warning('Missing data for payment confirmation email', [
-                    'application_id' => $applicationStatus->application_id
-                ]);
-                return false;
-            }
-
-            // Check if email already sent
-            if ($applicationStatus->payment_confirmation_email_sent) {
-                Log::info('Payment confirmation email already sent', [
-                    'application_id' => $applicationStatus->application_id
-                ]);
-                return true;
-            }
-
-            $mail = new PHPMailer(true);
-
-            // Server settings
-            $mail->isSMTP();
-            $mail->Host = config('mail.mailers.smtp.host');
-            $mail->SMTPAuth = true;
-            $mail->Username = config('mail.mailers.smtp.username');
-            $mail->Password = config('mail.mailers.smtp.password');
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port = config('mail.mailers.smtp.port');
-
-            // Recipients
-            $mail->setFrom(config('mail.from.address'), config('mail.from.name'));
-            $mail->addAddress($personalDetails->email, $personalDetails->full_name);
-
-            // Content
-            $mail->isHTML(true);
-            $mail->Subject = "Payment Confirmation - Application ID: {$applicationStatus->application_id}";
-            $mail->Body = $this->generatePaymentConfirmationEmailTemplate(
-                $personalDetails->full_name,
-                $applicationStatus->application_id,
-                $jobPosting,
-                $applicationStatus->payment_amount,
-                $applicationStatus->payment_transaction_id
-            );
-
-            $mail->send();
-
-            // Mark email as sent
-            $applicationStatus->update(['payment_confirmation_email_sent' => 1]);
-
-            Log::info('Payment confirmation email sent successfully', [
-                'application_id' => $applicationStatus->application_id,
-                'email' => $personalDetails->email
-            ]);
-
-            return true;
-
-        } catch (\Exception $e) {
-            Log::error('Failed to send payment confirmation email: ' . $e->getMessage(), [
-                'application_id' => $applicationStatus->application_id
-            ]);
-            return false;
-        }
-    }
-
-    /**
-     * Generate payment confirmation email template
-     */
-    private function generatePaymentConfirmationEmailTemplate($fullName, $applicationId, $jobPosting, $amount, $transactionId)
-    {
-        $logoBase64 = $this->getEmbeddedLogo();
-        
-        return "
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset='UTF-8'>
-            <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-            <title>Payment Confirmation</title>
-        </head>
-        <body style='margin: 0; padding: 0; font-family: \"Times New Roman\", serif; background-color: #f8f9fa;'>
-            <div style='max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dee2e6;'>
-                <!-- Header -->
-                <div style='background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 20px; text-align: center;'>
-                    <img src='{$logoBase64}' alt='Tura Municipal Board Logo' style='height: 60px; margin-bottom: 10px;'>
-                    <h1 style='margin: 0; font-size: 24px; font-weight: bold;'>TURA MUNICIPAL BOARD</h1>
-                    <p style='margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;'>Payment Confirmation</p>
-                </div>
-
-                <!-- Content -->
-                <div style='padding: 30px;'>
-                    <h2 style='color: #28a745; margin-bottom: 20px; font-size: 20px;'>
-                        ✅ Payment Successful!
-                    </h2>
-                    
-                    <p style='margin-bottom: 20px; line-height: 1.6;'>
-                        Dear <strong>{$fullName}</strong>,
-                    </p>
-                    
-                    <p style='margin-bottom: 20px; line-height: 1.6;'>
-                        Your payment for the job application has been successfully processed. Here are the details:
-                    </p>
-
-                    <!-- Payment Details -->
-                    <div style='background-color: #f8f9fa; border-left: 4px solid #28a745; padding: 20px; margin: 20px 0;'>
-                        <h3 style='margin: 0 0 15px 0; color: #333; font-size: 16px;'>Payment Details</h3>
-                        <table style='width: 100%; border-collapse: collapse;'>
-                            <tr>
-                                <td style='padding: 8px 0; font-weight: bold; width: 40%;'>Application ID:</td>
-                                <td style='padding: 8px 0;'>{$applicationId}</td>
-                            </tr>
-                            <tr>
-                                <td style='padding: 8px 0; font-weight: bold;'>Job Position:</td>
-                                <td style='padding: 8px 0;'>{$jobPosting->job_title_department}</td>
-                            </tr>
-                            <tr>
-                                <td style='padding: 8px 0; font-weight: bold;'>Payment Amount:</td>
-                                <td style='padding: 8px 0;'>₹{$amount}</td>
-                            </tr>
-                            <tr>
-                                <td style='padding: 8px 0; font-weight: bold;'>Transaction ID:</td>
-                                <td style='padding: 8px 0;'>{$transactionId}</td>
-                            </tr>
-                            <tr>
-                                <td style='padding: 8px 0; font-weight: bold;'>Payment Date:</td>
-                                <td style='padding: 8px 0;'>" . date('d-m-Y H:i:s') . "</td>
-                            </tr>
-                        </table>
-                    </div>
-
-                    <div style='background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 15px; margin: 20px 0;'>
-                        <p style='margin: 0; color: #1976d2;'>
-                            <strong>📋 Next Steps:</strong><br>
-                            Your application is now complete. You can download and print your application form from your dashboard.
-                        </p>
-                    </div>
-
-                    <p style='margin-bottom: 20px; line-height: 1.6;'>
-                        Thank you for applying with Tura Municipal Board. If you have any questions, please contact our office.
-                    </p>
-
-                    <div style='text-align: center; margin: 30px 0;'>
-                        <p style='color: #666; font-size: 14px; margin: 0;'>
-                            This is an automated email. Please do not reply to this message.
-                        </p>
-                    </div>
-                </div>
-
-                <!-- Footer -->
-                <div style='background-color: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #dee2e6;'>
-                    <p style='margin: 0; color: #666; font-size: 12px;'>
-                        © " . date('Y') . " Tura Municipal Board. All rights reserved.<br>
-                        East Garo Hills, Meghalaya
-                    </p>
-                </div>
-            </div>
-        </body>
-        </html>";
-    }
-
-    /**
-     * Get embedded logo for email
-     */
-    private function getEmbeddedLogo()
-    {
-        try {
-            $logoPath = public_path('images/tura_municipal_board_logo.png');
-            
-            if (file_exists($logoPath)) {
-                $logoData = base64_encode(file_get_contents($logoPath));
-                return 'data:image/png;base64,' . $logoData;
-            } else {
-                // Return a placeholder or default logo
-                return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
-            }
-        } catch (\Exception $e) {
-            Log::warning('Failed to load logo for email: ' . $e->getMessage());
-            return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
-        }
-    }
-
-    /**
-     * Redirect to success page
-     */
-    private function redirectToSuccess($applicationId)
-    {
-        $successUrl = config('app.frontend_url', 'https://turamunicipalboard.com') . '/job-payment-success?application_id=' . $applicationId;
-        return redirect()->away($successUrl);
-    }
-
-    /**
-     * Redirect to failure page
-     */
-    private function redirectToFailure($reason = 'Payment failed')
-    {
-        $failureUrl = config('app.frontend_url', 'https://turamunicipalboard.com') . '/job-payment-failure?reason=' . urlencode($reason);
-        return redirect()->away($failureUrl);
-    }
-
-    /**
-     * Encrypt data for SBI ePay
-     */
+    
     public function encrypt($data, $key)
     {
-        $iv = substr($key, 0, 16);
-        $algo = 'aes-128-cbc';
+        // We will use openssl for AES encryption
+        $iv = substr($key, 0, 16);  // Using the first 16 bytes of the key as the IV
+        $algo = 'aes-128-cbc'; // AES algorithm with 128 bit key, CBC mode
 
+        // Encrypt the data
         $cipherText = openssl_encrypt(
             $data,
             $algo,
@@ -654,20 +167,21 @@ class JobPaymentController extends Controller
             OPENSSL_RAW_DATA,
             $iv
         );
-
+        
+        // Encode the encrypted data to base64
         return base64_encode($cipherText);
     }
 
-    /**
-     * Decrypt data from SBI ePay
-     */
     public function decrypt($cipherText, $key)
     {
-        $iv = substr($key, 0, 16);
-        $algo = 'aes-128-cbc';
+        // We will use openssl for AES decryption
+        $iv = substr($key, 0, 16);  // Using the first 16 bytes of the key as the IV
+        $algo = 'aes-128-cbc'; // AES algorithm with 128 bit key, CBC mode
 
+        // Decode the base64 encoded ciphertext
         $cipherText = base64_decode($cipherText);
 
+        // Decrypt the data
         return openssl_decrypt(
             $cipherText,
             $algo,
@@ -676,46 +190,225 @@ class JobPaymentController extends Controller
             $iv
         );
     }
+    
+   public function successData(Request $request){
+        // Define the encryption key
+        $key = $_ENV['PAYMENT_KEY'];
+        
+        // Validate that the 'encData' is present in the request
+        if (!$request->has('encData')) {
+            Log::error('Missing encData parameter in the request');
+            return redirect()->away('https://turamunicipalboard.com/failureJobPayment.html');
+            
+        }
+    
+        // Retrieve encrypted data
+        $encData = $request->input('encData');
+    
+        // Decrypt the data
+        try {
+            $data = $this->decrypt($encData, $key);
+        } catch (\Exception $e) {
+            Log::error('Decryption failed', ['exception' => $e]);
+             return redirect()->away('https://turamunicipalboard.com/failureJobPayment.html');
+        }
+    
+        // Validate the decrypted data
+        $explode = explode("|", $data);
+    
+        if (count($explode) < 3) {
+            Log::warning('Invalid decrypted data format', ['data' => $data]);
+            return redirect()->away('https://turamunicipalboard.com/failureJobPayment.html');
+        }
+    
+        // Extract status from decrypted data
+        $status = $explode[2];
+        $amount = $explode[3];
+        $orderId = $explode[0];
+        Log::error('Job Payment Data', [
+                'order_id' => $explode[0],
+                'response' => $data,
+                'status' => $status,
+                'amount' => $amount,
+                'exploded_data' => $explode
+            ]);
+        
+        $doubleVerification = $this->doubleVerification($orderId, $amount);
 
-    /**
-     * Double verification with SBI ePay
-     */
-    public function doubleVerification($orderId, $amount)
-    {
-        $merchantId = config('services.sbiepay.merchant_id', '1003253');
-        $merchantOrderNo = $orderId;
-        $url = "https://www.sbiepay.sbi/payagg/statusQuery/getStatusQuery";
-        $queryRequest = "|$merchantId|$merchantOrderNo|$amount";
-
-        $queryRequest33 = http_build_query(array(
-            'queryRequest' => $queryRequest,
-            "aggregatorId" => "SBIEPAY",
-            "merchantId" => $merchantId
-        ));
-
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1_2,
-            CURLOPT_HTTPAUTH => CURLAUTH_ANY,
-            CURLOPT_TIMEOUT => 60,
-            CURLOPT_POST => 1,
-            CURLOPT_POSTFIELDS => $queryRequest33,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_HTTPHEADER => [
-                'Content-Type: application/x-www-form-urlencoded'
-            ]
+        Log::info('Double Verification Response', [
+            'order_id' => $orderId,
+            'verification_status' => $doubleVerification['status'],
+            'verification_data' => $doubleVerification['data']
         ]);
 
+        // Check if the double verification failed (e.g., cURL or server error)
+        if ($doubleVerification['status'] != "success") {
+            // Update JobAppliedStatus instead of PaymentModel
+            JobAppliedStatus::where('payment_order_id', $explode[0])->update([
+                'payment_status' => 'failed',
+                'payment_date' => now(), // Set failure date
+                'payment_transaction_id' => isset($explode[1]) ? $explode[1] : null, // Store transaction ID even on failure
+                'payment_response_body' => $data, // Store response data like PaymentController
+                'updated_at' => now()
+            ]);
+        
+            Log::error('Double verification failed', [
+                'order_id' => $explode[0],
+                'response' => $doubleVerification
+            ]);
+        
+            return redirect()->away('https://turamunicipalboard.com/failureJobPayment.html');
+        }
+        
+        // Safely explode and check the response format
+        $explodeDoubleVeri = explode("|", $doubleVerification['data']);
+        
+        Log::info('Double Verification Parsed', [
+            'verification_array' => $explodeDoubleVeri,
+            'array_count' => count($explodeDoubleVeri),
+            'status_element' => isset($explodeDoubleVeri[2]) ? trim($explodeDoubleVeri[2]) : 'NOT_SET'
+        ]);
+        
+        // Ensure there are enough elements AND status is SUCCESS
+        if (count($explodeDoubleVeri) >= 3 && trim($explodeDoubleVeri[2]) == "SUCCESS") {
+            // Update JobAppliedStatus instead of PaymentModel
+            JobAppliedStatus::where('payment_order_id', $explode[0])->update([
+                'payment_status' => 'paid',
+                'payment_date' => now(),
+                'payment_transaction_id' => isset($explode[1]) ? $explode[1] : $explode[0],
+                'payment_response_body' => $data, // Store response data like PaymentController
+                'stage' => 7, // Final stage
+                'updated_at' => now()
+            ]);
+    
+            Log::info('Transaction successful via double verification', ['data' => $data]);
+            return redirect()->away('https://turamunicipalboard.com/successJobPayment.html');
+        }
+    
+        Log::info('Payment Status Check', [
+            'status' => $status,
+            'status_comparison_SUCCESS' => ($status == "SUCCESS"),
+            'about_to_check_main_status_flow' => true
+        ]);
+    
+        // Redirect based on the status
+        if ($status == "SUCCESS") {
+            // Update JobAppliedStatus instead of PaymentModel
+            $updateResult = JobAppliedStatus::where('payment_order_id', $explode[0])->update([
+                'payment_status' => 'paid',
+                'payment_date' => now(),
+                'payment_transaction_id' => isset($explode[1]) ? $explode[1] : $explode[0],
+                'payment_response_body' => $data, // Store response data like PaymentController
+                'stage' => 7, // Final stage
+                'updated_at' => now()
+            ]);
+    
+            Log::info('Transaction successful - Database update', [
+                'data' => $data,
+                'order_id' => $explode[0],
+                'transaction_id' => isset($explode[1]) ? $explode[1] : $explode[0],
+                'rows_updated' => $updateResult
+            ]);
+            return redirect()->away('https://turamunicipalboard.com/successJobPayment.html');
+        } elseif ($status == "FAIL") {
+            // Update JobAppliedStatus instead of PaymentModel
+            JobAppliedStatus::where('payment_order_id', $explode[0])->update([
+                'payment_status' => 'failed',
+                'payment_date' => now(), // Set failure date
+                'payment_transaction_id' => isset($explode[1]) ? $explode[1] : null, // Store transaction ID even on failure
+                'payment_response_body' => $data, // Store response data like PaymentController
+                'updated_at' => now()
+            ]);
+    
+            Log::info('Transaction failed', ['data' => $data]);
+            return redirect()->away('https://turamunicipalboard.com/failureJobPayment.html');
+        } else {
+            // Update JobAppliedStatus instead of PaymentModel
+            JobAppliedStatus::where('payment_order_id', $explode[0])->update([
+                'payment_status' => 'failed',
+                'payment_date' => now(), // Set failure date
+                'payment_transaction_id' => isset($explode[1]) ? $explode[1] : null, // Store transaction ID even on failure
+                'payment_response_body' => $data, // Store response data like PaymentController
+                'updated_at' => now()
+            ]);
+            Log::warning('Unknown status received', ['status' => $status, 'data' => $data]);
+            return redirect()->away('https://turamunicipalboard.com/failureJobPayment.html');
+        }
+    }
+
+    public function doubleVerification($orderId, $amount)
+    {
+        $merchantId = "1003253";
+        $merchantOrderNo = $orderId; 
+       	$url="https://www.sbiepay.sbi/payagg/statusQuery/getStatusQuery"; // double verification url
+	    $queryRequest="|$merchantId|$merchantOrderNo|$amount"; 
+
+		$queryRequest33=http_build_query(array('queryRequest' => $queryRequest,"aggregatorId"=>"SBIEPAY","merchantId"=>$merchantId));
+		//echo "$url,$queryRequest33";exit;
+		
+		$ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_SSLVERSION     => CURL_SSLVERSION_TLSv1_2,
+            CURLOPT_HTTPAUTH       => CURLAUTH_ANY,
+            CURLOPT_TIMEOUT        => 60,
+            CURLOPT_POST           => 1,
+            CURLOPT_POSTFIELDS     => $queryRequest33,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_SSL_VERIFYPEER => false, 
+            CURLOPT_SSL_VERIFYHOST => 0,     
+            CURLOPT_HTTPHEADER     => [
+                'Content-Type: application/x-www-form-urlencoded'
+            ]
+        ]);			
         $response = curl_exec($ch);
 
         if (curl_errno($ch)) {
-            curl_close($ch);
-            return array('status' => "error", 'data' => curl_error($ch));
+            return array('status' => "error",'data' =>curl_error($ch));
         } else {
-            curl_close($ch);
-            return array('status' => "success", 'data' => $response);
+            return array('status' => "success",'data' =>$response);
         }
+	}
+
+    /**
+     * Temporary method to handle old route calls to initiatePayment
+     * Redirects to the correct payment method
+     */
+    public function initiatePayment(Request $request)
+    {
+        // Log the call to this deprecated method
+        Log::warning('JobPaymentController - Deprecated initiatePayment called', [
+            'request_data' => $request->all(),
+            'application_id' => $request->input('application_id'),
+            'redirect_to' => 'payment method'
+        ]);
+
+        // Extract application ID from request
+        $applicationId = $request->input('application_id');
+        
+        if (!$applicationId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Application ID is required'
+            ], 400);
+        }
+
+        // Redirect to the correct payment method
+        return $this->payment($applicationId);
+    }
+
+    /**
+     * Handle old showPaymentFormByApplicationId calls
+     * Redirects to the correct payment method
+     */
+    public function showPaymentFormByApplicationId($applicationId)
+    {
+        // Log the call to this deprecated method
+        Log::warning('JobPaymentController - Deprecated showPaymentFormByApplicationId called', [
+            'application_id' => $applicationId,
+            'redirect_to' => 'payment method'
+        ]);
+
+        // Redirect to the correct payment method
+        return $this->payment($applicationId);
     }
 }

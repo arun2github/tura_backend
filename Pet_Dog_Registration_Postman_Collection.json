@@ -1,0 +1,315 @@
+{
+	"info": {
+		"_postman_id": "12345678-1234-1234-1234-123456789012",
+		"name": "Pet Dog Registration API",
+		"description": "Complete Postman collection for Pet Dog Registration using Dynamic Form approach",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "User Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"user@example.com\",\n    \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"login"
+							]
+						},
+						"description": "Login to get authentication token"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Pet Dog Registration",
+			"item": [
+				{
+					"name": "Submit Pet Dog Registration",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"form_id\": 12,\n    \"owner_name\": \"John Doe\",\n    \"owner_phone\": \"9876543210\",\n    \"owner_email\": \"john.doe@example.com\",\n    \"owner_address\": \"123 Main Street, Tura, West Garo Hills, Meghalaya - 794001\",\n    \"owner_aadhar_number\": \"123456789012\",\n    \"dog_name\": \"Buddy\",\n    \"dog_breed\": \"Golden Retriever\",\n    \"dog_age\": 3,\n    \"dog_color\": \"Golden\",\n    \"dog_gender\": \"male\",\n    \"dog_weight\": 30.5,\n    \"vaccination_status\": \"completed\",\n    \"vaccination_date\": \"2024-11-15\",\n    \"veterinarian_name\": \"Dr. Smith Johnson\",\n    \"veterinarian_license\": \"VET12345\",\n    \"upload_files\": [],\n    \"document_list\": [\n        {\n            \"name\": \"vaccination_certificate.pdf\",\n            \"data\": \"data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNjEyIDc5Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovUmVzb3VyY2VzIDw8Ci9Gb250IDw8Ci9GMSA0IDAgUgo+Pgo+PgovQ29udGVudHMgNSAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL1R5cGUgL0ZvbnQKL1N1YnR5cGUgL1R5cGUxCi9CYXNlRm9udCAvSGVsdmV0aWNhCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9MZW5ndGggNDQKPj4Kc3RyZWFtCkJUCi9GMSAxMiBUZgoxMDAgNzAwIFRkCihWYWNjaW5hdGlvbiBDZXJ0aWZpY2F0ZSkgVGoKRVQKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNgo=\"\n        },\n        {\n            \"name\": \"dog_photo.jpg\",\n            \"data\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=\"\n        }\n    ],\n    \"declaration\": \"I hereby declare that all the information provided above is true and accurate to the best of my knowledge. I understand that providing false information may result in the rejection of this application.\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/petDogRegistration",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"petDogRegistration"
+							]
+						},
+						"description": "Submit Pet Dog Registration with all required fields"
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Pet Dog Registration - Optional Fields",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"form_id\": 12,\n    \"owner_name\": \"Sarah Wilson\",\n    \"owner_phone\": \"8765432109\",\n    \"owner_email\": \"sarah.wilson@example.com\",\n    \"owner_address\": \"456 Oak Avenue, Tura Municipal Area, Meghalaya - 794002\",\n    \"owner_aadhar_number\": \"987654321098\",\n    \"dog_age\": 2,\n    \"dog_color\": \"Brown and White\",\n    \"dog_gender\": \"female\",\n    \"dog_weight\": 15.8,\n    \"vaccination_status\": \"pending\",\n    \"vaccination_date\": \"2024-12-20\",\n    \"veterinarian_name\": \"Dr. Maria Rodriguez\",\n    \"veterinarian_license\": \"VET67890\",\n    \"upload_files\": [],\n    \"document_list\": [\n        {\n            \"name\": \"owner_id_proof.jpg\",\n            \"data\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=\"\n        }\n    ],\n    \"declaration\": \"I confirm that the information provided is accurate and I agree to comply with all municipal regulations regarding pet registration.\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/petDogRegistration",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"petDogRegistration"
+							]
+						},
+						"description": "Submit Pet Dog Registration with dog_name and dog_breed as optional (null/empty)"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Form Management",
+			"item": [
+				{
+					"name": "Get All Forms - Pet Dog Registration",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"stage\": \"consumer\",\n    \"form_type\": \"12\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/getAllForms",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"getAllForms"
+							]
+						},
+						"description": "Get all Pet Dog Registration applications for consumer (form_type = 12)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Form Details",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"application_id\": \"PDR20241208123456\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/getFormDetails",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"getFormDetails"
+							]
+						},
+						"description": "Get specific Pet Dog Registration application details by application_id"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Test Cases",
+			"item": [
+				{
+					"name": "Validation Test - Missing Required Fields",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"form_id\": 12,\n    \"owner_name\": \"Test User\",\n    \"owner_phone\": \"123\",\n    \"owner_email\": \"invalid-email\",\n    \"dog_age\": 25,\n    \"dog_weight\": 150\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/petDogRegistration",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"petDogRegistration"
+							]
+						},
+						"description": "Test validation errors for missing/invalid fields"
+					},
+					"response": []
+				},
+				{
+					"name": "Validation Test - Invalid Aadhar",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"form_id\": 12,\n    \"owner_name\": \"Test User\",\n    \"owner_phone\": \"9876543210\",\n    \"owner_email\": \"test@example.com\",\n    \"owner_address\": \"Test Address\",\n    \"owner_aadhar_number\": \"12345\",\n    \"dog_age\": 3,\n    \"dog_color\": \"Brown\",\n    \"dog_gender\": \"male\",\n    \"dog_weight\": 25,\n    \"vaccination_status\": \"completed\",\n    \"vaccination_date\": \"2024-12-01\",\n    \"veterinarian_name\": \"Dr. Test\",\n    \"veterinarian_license\": \"VET123\",\n    \"upload_files\": [],\n    \"document_list\": [{\n        \"name\": \"test.pdf\",\n        \"data\": \"data:application/pdf;base64,dGVzdA==\"\n    }],\n    \"declaration\": \"Test declaration\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/petDogRegistration",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"petDogRegistration"
+							]
+						},
+						"description": "Test validation for invalid Aadhar number (should be 12 digits)"
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "auth_token",
+			"value": "your_jwt_token_here",
+			"type": "string"
+		},
+		{
+			"key": "production_url",
+			"value": "https://your-hostinger-domain.com",
+			"type": "string"
+		}
+	]
+}
