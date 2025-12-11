@@ -40,8 +40,9 @@ class DynamicPetDogController extends Controller
                 'veterinarian_name' => 'nullable|string|between:2,100', // Make optional
                 'veterinarian_license' => 'nullable|string|between:5,50', // Make optional
                 'upload_files' => 'sometimes|array', // Make optional
-                // 'upload_files.*' => 'required|file|mimes:jpeg,png,pdf|max:2048', // Validate each file
                 'document_list' => 'sometimes|array', // Make optional
+                'pet_photo' => 'required|string', // base64 string required
+                'owner_photo_with_pet' => 'required|string', // base64 string required
                 'declaration' => 'required|string|min:1', // Accept any non-empty string
             ]);
 
@@ -76,26 +77,48 @@ class DynamicPetDogController extends Controller
                 'ceo_status' => 'Approved'       // CEO status: Approved (from ENUM)
             ]);
 
-            // Process form data dynamically - following exact pattern from existing forms
+            // Generate pet tag number (TMB-1, TMB-2, ...)
+            $petTagCount = \App\Models\PetDogRegistration::whereNotNull('metal_tag_number')->count();
+            $pet_tag_number = 'TMB-' . ($petTagCount + 1);
+
             $formData = [];
             $fileName = date('Ymdhis');
             $file_path = 'uploads/' . $fileName;
-            
+            $pet_photo_path = null;
+            $owner_photo_with_pet_path = null;
+
+            // Save all fields except pet_photo and owner_photo_with_pet
             foreach($request->all() as $key => $req) {
-                if($key == "upload_files" || $key == "form_id") {
-                    // Handle file uploads if any (keeping pattern consistent)
+                if ($key === 'pet_photo') {
+                    // Process pet photo base64
+                    $pet_photo_path = $this->processBase64Document($req, $file_path, 'pet_photo.jpg');
+                } else if ($key === 'owner_photo_with_pet') {
+                    // Process owner photo with pet base64
+                    $owner_photo_with_pet_path = $this->processBase64Document($req, $file_path, 'owner_photo_with_pet.jpg');
+                } else if ($key == "upload_files" || $key == "form_id") {
                     if ($request->hasFile('upload_files')) {
                         $files = $request->file('upload_files');
                         if (is_array($files)) {
                             foreach ($files as $file) {
+                                $fileType = $file->getClientOriginalName();
                                 $filePath = $file->store($file_path, 'public');
+                                $formData[] = [
+                                    'parameter' => $fileType,
+                                    'value' => $filePath,
+                                    'form_id' => $form_id
+                                ];
                             }
                         } else {
+                            $fileType = $files->getClientOriginalName();
                             $filePath = $files->store($file_path, 'public');
+                            $formData[] = [
+                                'parameter' => $fileType,
+                                'value' => $filePath,
+                                'form_id' => $form_id
+                            ];
                         }
                     }
                 } else {
-                    // Store all other data as parameter-value pairs
                     $value = is_array($req) ? json_encode($req) : $req;
                     $formData[] = [
                         'parameter' => $key,
@@ -104,31 +127,57 @@ class DynamicPetDogController extends Controller
                     ];
                 }
             }
-            
-            // Add file path parameter (following existing pattern)
+
+            // Add file path parameter
             $formData[] = [
                 'parameter' => 'upload_file_path',
                 'value' => $fileName,
                 'form_id' => $form_id
             ];
+            // Add pet tag number
+            $formData[] = [
+                'parameter' => 'pet_tag_number',
+                'value' => $pet_tag_number,
+                'form_id' => $form_id
+            ];
+            // Add pet photo path
+            $formData[] = [
+                'parameter' => 'pet_photo_path',
+                'value' => $pet_photo_path ?? '',
+                'form_id' => $form_id
+            ];
+            // Add owner photo with pet path
+            $formData[] = [
+                'parameter' => 'owner_photo_with_pet_path',
+                'value' => $owner_photo_with_pet_path ?? '',
+                'form_id' => $form_id
+            ];
 
-            // Process base64 documents if present (since system uses base64)
+            // Process base64 documents if present
             if(isset($request->document_list) && is_array($request->document_list)) {
                 foreach($request->document_list as $index => $doc) {
-                    if(isset($doc['data']) && isset($doc['name'])) {
-                        $this->processBase64Document($doc['data'], $file_path, $doc['name']);
+                    if(isset($doc['data']) && isset($doc['name']) && isset($doc['type'])) {
+                        $savedPath = $this->processBase64Document($doc['data'], $file_path, $doc['name']);
+                        $formData[] = [
+                            'parameter' => $doc['type'],
+                            'value' => $savedPath,
+                            'form_id' => $form_id
+                        ];
                     }
                 }
             }
 
-            // Insert all form data at once (following exact pattern)
+            // Insert all form data
             FormEntityModel::insert($formData);
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Pet Dog Registration submitted successfully',
                 'application_id' => $app_id,
-                'form_id' => $form_id
+                'form_id' => $form_id,
+                'pet_tag_number' => $pet_tag_number,
+                'pet_photo_path' => $pet_photo_path,
+                'owner_photo_with_pet_path' => $owner_photo_with_pet_path
             ], 200);
 
         } catch (MunicipalBoardException $exception) {
