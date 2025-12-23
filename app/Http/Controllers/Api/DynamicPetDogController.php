@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use App\Models\FormMasterTblModel;
 use App\Models\FormEntityModel;
+use App\Models\PaymentModel;
+use App\Models\User;
 use App\Exceptions\MunicipalBoardException;
 
 class DynamicPetDogController extends Controller
@@ -64,11 +66,12 @@ class DynamicPetDogController extends Controller
             
             // Create master record (following exact pattern from existing forms)
             $form_data = [
-                'form_id' => $request->form_id,
+                'form_id' => $request->form_id, // Form type (0 for Pet Dog Registration)
+                'form_type_id' => $request->form_id, // Explicit form type reference
                 'application_id' => $app_id,
                 'inserted_by' => $user->id
             ];
-            $form_id = FormMasterTblModel::insertGetId($form_data);
+            $form_id = FormMasterTblModel::insertGetId($form_data); // This is the unique submission ID
 
             // Auto-approve Pet Dog Registration (using exact ENUM values from database)
             FormMasterTblModel::where('id', $form_id)->update([
@@ -78,7 +81,8 @@ class DynamicPetDogController extends Controller
             ]);
 
             // Generate pet tag number (TMB-1, TMB-2, ...)
-            $petTagCount = \App\Models\PetDogRegistration::whereNotNull('metal_tag_number')->count();
+            // Count existing pet tag numbers from form_entity table
+            $petTagCount = FormEntityModel::where('parameter', 'pet_tag_number')->count();
             $pet_tag_number = 'TMB-' . ($petTagCount + 1);
 
             $formData = [];
@@ -105,7 +109,8 @@ class DynamicPetDogController extends Controller
                                 $formData[] = [
                                     'parameter' => $fileType,
                                     'value' => $filePath,
-                                    'form_id' => $form_id
+                                    'form_id' => $form_id,
+                                    'form_type_id' => $request->form_id
                                 ];
                             }
                         } else {
@@ -114,7 +119,8 @@ class DynamicPetDogController extends Controller
                             $formData[] = [
                                 'parameter' => $fileType,
                                 'value' => $filePath,
-                                'form_id' => $form_id
+                                'form_id' => $form_id,
+                                'form_type_id' => $request->form_id
                             ];
                         }
                     }
@@ -123,7 +129,8 @@ class DynamicPetDogController extends Controller
                     $formData[] = [
                         'parameter' => $key,
                         'value' => $value,
-                        'form_id' => $form_id
+                        'form_id' => $form_id,
+                        'form_type_id' => $request->form_id // Add form type ID
                     ];
                 }
             }
@@ -132,25 +139,29 @@ class DynamicPetDogController extends Controller
             $formData[] = [
                 'parameter' => 'upload_file_path',
                 'value' => $fileName,
-                'form_id' => $form_id
+                'form_id' => $form_id,
+                'form_type_id' => $request->form_id
             ];
             // Add pet tag number
             $formData[] = [
                 'parameter' => 'pet_tag_number',
                 'value' => $pet_tag_number,
-                'form_id' => $form_id
+                'form_id' => $form_id,
+                'form_type_id' => $request->form_id
             ];
             // Add pet photo path
             $formData[] = [
                 'parameter' => 'pet_photo_path',
                 'value' => $pet_photo_path ?? '',
-                'form_id' => $form_id
+                'form_id' => $form_id,
+                'form_type_id' => $request->form_id
             ];
             // Add owner photo with pet path
             $formData[] = [
                 'parameter' => 'owner_photo_with_pet_path',
                 'value' => $owner_photo_with_pet_path ?? '',
-                'form_id' => $form_id
+                'form_id' => $form_id,
+                'form_type_id' => $request->form_id
             ];
 
             // Process base64 documents if present
@@ -161,7 +172,8 @@ class DynamicPetDogController extends Controller
                         $formData[] = [
                             'parameter' => $doc['type'],
                             'value' => $savedPath,
-                            'form_id' => $form_id
+                            'form_id' => $form_id,
+                            'form_type_id' => $request->form_id
                         ];
                     }
                 }
@@ -174,10 +186,8 @@ class DynamicPetDogController extends Controller
                 'status' => 'success',
                 'message' => 'Pet Dog Registration submitted successfully',
                 'application_id' => $app_id,
-                'form_id' => $form_id,
-                'pet_tag_number' => $pet_tag_number,
-                'pet_photo_path' => $pet_photo_path,
-                'owner_photo_with_pet_path' => $owner_photo_with_pet_path
+                'form_id' => $form_id, // Database generated unique ID (back to original format)
+                'pet_tag_number' => $pet_tag_number
             ], 200);
 
         } catch (MunicipalBoardException $exception) {
@@ -255,6 +265,330 @@ class DynamicPetDogController extends Controller
         ];
         
         return $mimeMap[$mimeType] ?? 'bin';
+    }
+
+    /**
+     * Get all Pet Dog Registration applications (for CEO/Employee)
+     * POST /api/pet-dog/applications
+     */
+    public function getAllApplications(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            if (!$user || !in_array($user->role, ['ceo', 'editor'])) {
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Unauthorized access. CEO/Employee access required.',
+                ], 403);
+            }
+
+            // Validate JSON request
+            $validator = Validator::make($request->all(), [
+                'per_page' => 'integer|min:1|max:100',
+                'page' => 'integer|min:1',
+                'status' => 'string|nullable',
+                'payment_status' => 'string|nullable|in:pending,paid,failed',
+                'search' => 'string|nullable|max:100'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Validation Failed',
+                    'errors' => $validator->errors()->toArray(),
+                ], 400);
+            }
+
+            // Get parameters from JSON body
+            $perPage = $request->input('per_page', 20);
+            $page = $request->input('page', 1);
+            $status = $request->input('status'); // Filter by status
+            $paymentStatus = $request->input('payment_status'); // Filter by payment status: paid, pending, failed
+            $search = $request->input('search'); // Search by application_id, owner_name, dog_name
+
+            // Base query
+            $query = FormMasterTblModel::select([
+                'form_master_tbl.id',
+                'form_master_tbl.application_id',
+                'form_master_tbl.status',
+                'form_master_tbl.employee_status',
+                'form_master_tbl.ceo_status',
+                'form_master_tbl.inserted_at',
+                'users.firstname',
+                'users.lastname',
+                'users.email',
+                'users.phone_no',
+                'users.ward_id',
+                'users.locality'
+            ])
+            ->leftJoin('users', 'form_master_tbl.inserted_by', '=', 'users.id')
+            ->leftJoin('payment_details', 'form_master_tbl.id', '=', 'payment_details.form_id')
+            ->where('form_master_tbl.form_id', 0); // Pet Dog Registration
+
+            // Apply filters
+            if ($status) {
+                $query->where('form_master_tbl.status', $status);
+            }
+
+            if ($paymentStatus) {
+                if ($paymentStatus === 'pending') {
+                    // No payment record exists OR payment status is pending/failed
+                    $query->where(function($q) {
+                        $q->whereNull('payment_details.id')
+                          ->orWhere('payment_details.status', '!=', 'success');
+                    });
+                } elseif ($paymentStatus === 'paid') {
+                    // Payment exists and is successful
+                    $query->where('payment_details.status', 'success');
+                } elseif ($paymentStatus === 'failed') {
+                    // Payment exists but failed
+                    $query->where('payment_details.status', 'failed');
+                }
+            }
+
+            if ($search) {
+                $query->where(function($q) use ($search) {
+                    $q->where('form_master_tbl.application_id', 'LIKE', "%{$search}%")
+                      ->orWhereExists(function($subQ) use ($search) {
+                          $subQ->select(\DB::raw(1))
+                               ->from('form_entity')
+                               ->whereColumn('form_entity.form_id', 'form_master_tbl.id')
+                               ->where(function($entityQ) use ($search) {
+                                   $entityQ->where('form_entity.parameter', 'owner_name')
+                                           ->where('form_entity.value', 'LIKE', "%{$search}%");
+                               })
+                               ->orWhere(function($entityQ) use ($search) {
+                                   $entityQ->where('form_entity.parameter', 'dog_name')
+                                           ->where('form_entity.value', 'LIKE', "%{$search}%");
+                               });
+                      });
+                });
+            }
+
+            // Get total count (clone query before applying pagination)
+            $countQuery = clone $query;
+            $total = $countQuery->distinct('form_master_tbl.id')->count('form_master_tbl.id');
+
+            // Apply pagination and ensure distinct results (due to LEFT JOIN)
+            $applications = $query->orderBy('form_master_tbl.inserted_at', 'desc')
+                                 ->distinct()
+                                 ->offset(($page - 1) * $perPage)
+                                 ->limit($perPage)
+                                 ->get();
+
+            // Fetch additional details for each application
+            $result = [];
+            foreach ($applications as $app) {
+                // Get form entity data
+                $formData = FormEntityModel::where('form_id', $app->id)
+                    ->whereIn('parameter', ['owner_name', 'owner_email', 'owner_phone', 'dog_name', 'dog_breed', 'pet_tag_number', 'vaccination_status'])
+                    ->get()
+                    ->keyBy('parameter');
+
+                // Get payment status
+                $payment = PaymentModel::where('form_id', $app->id)->first();
+
+                $result[] = [
+                    'id' => $app->id,
+                    'application_id' => $app->application_id,
+                    'status' => $app->status,
+                    'employee_status' => $app->employee_status,
+                    'ceo_status' => $app->ceo_status,
+                    'submitted_date' => $app->inserted_at,
+                    'user_details' => [
+                        'name' => trim($app->firstname . ' ' . $app->lastname),
+                        'email' => $app->email,
+                        'phone' => $app->phone_no,
+                        'ward_id' => $app->ward_id,
+                        'locality' => $app->locality
+                    ],
+                    'pet_details' => [
+                        'owner_name' => $formData->get('owner_name')->value ?? 'N/A',
+                        'owner_email' => $formData->get('owner_email')->value ?? 'N/A',
+                        'owner_phone' => $formData->get('owner_phone')->value ?? 'N/A',
+                        'dog_name' => $formData->get('dog_name')->value ?? 'N/A',
+                        'dog_breed' => $formData->get('dog_breed')->value ?? 'N/A',
+                        'pet_tag_number' => $formData->get('pet_tag_number')->value ?? 'N/A',
+                        'vaccination_status' => $formData->get('vaccination_status')->value ?? 'N/A'
+                    ],
+                    'payment_status' => $payment ? $payment->status : 'pending',
+                    'payment_amount' => $payment ? $payment->amount : 250.00
+                ];
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Pet Dog Registration applications retrieved successfully',
+                'data' => [
+                    'applications' => $result,
+                    'pagination' => [
+                        'current_page' => (int)$page,
+                        'per_page' => (int)$perPage,
+                        'total' => $total,
+                        'total_pages' => ceil($total / $perPage)
+                    ]
+                ]
+            ], 200);
+
+        } catch (\Exception $exception) {
+            Log::error('Pet Dog Applications List Error: ' . $exception->getMessage());
+            return response()->json([
+                'status' => 'failed',
+                'message' => 'Failed to retrieve applications',
+                'error' => $exception->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get detailed information for a specific Pet Dog Registration (for CEO/Employee)
+     * POST /api/pet-dog/application-details
+     */
+    public function getApplicationDetails(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            if (!$user || !in_array($user->role, ['ceo', 'editor'])) {
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Unauthorized access. CEO/Employee access required.',
+                ], 403);
+            }
+
+            // Validate JSON request
+            $validator = Validator::make($request->all(), [
+                'application_id' => 'required|integer|min:1'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Validation Failed',
+                    'errors' => $validator->errors()->toArray(),
+                ], 400);
+            }
+
+            $id = $request->input('application_id');
+
+            // Get application details
+            $application = FormMasterTblModel::select([
+                'form_master_tbl.*',
+                'users.firstname',
+                'users.lastname',
+                'users.email',
+                'users.phone_no',
+                'users.ward_id',
+                'users.locality',
+                'users.dob',
+                'users.verifyemail'
+            ])
+            ->leftJoin('users', 'form_master_tbl.inserted_by', '=', 'users.id')
+            ->where('form_master_tbl.id', $id)
+            ->where('form_master_tbl.form_id', 0) // Pet Dog Registration
+            ->first();
+
+            if (!$application) {
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Pet Dog Registration application not found',
+                ], 404);
+            }
+
+            // Get all form entity data
+            $formEntities = FormEntityModel::where('form_id', $id)->get()->keyBy('parameter');
+
+            // Get payment details
+            $payment = PaymentModel::where('form_id', $id)->first();
+
+            // Structure the response
+            $response = [
+                'application_info' => [
+                    'id' => $application->id,
+                    'application_id' => $application->application_id,
+                    'form_id' => $application->form_id,
+                    'status' => $application->status,
+                    'employee_status' => $application->employee_status,
+                    'ceo_status' => $application->ceo_status,
+                    'submitted_date' => $application->inserted_at,
+                    'updated_date' => $application->updated_at
+                ],
+                'user_account_details' => [
+                    'user_id' => $application->inserted_by,
+                    'full_name' => trim($application->firstname . ' ' . $application->lastname),
+                    'firstname' => $application->firstname,
+                    'lastname' => $application->lastname,
+                    'email' => $application->email,
+                    'phone_no' => $application->phone_no,
+                    'ward_id' => $application->ward_id,
+                    'locality' => $application->locality,
+                    'date_of_birth' => $application->dob,
+                    'email_verified' => $application->verifyemail
+                ],
+                'owner_details' => [
+                    'owner_name' => $formEntities->get('owner_name')->value ?? 'N/A',
+                    'owner_email' => $formEntities->get('owner_email')->value ?? 'N/A',
+                    'owner_phone' => $formEntities->get('owner_phone')->value ?? 'N/A',
+                    'owner_address' => $formEntities->get('owner_address')->value ?? 'N/A',
+                    'owner_aadhar_number' => $formEntities->get('owner_aadhar_number')->value ?? 'N/A'
+                ],
+                'dog_details' => [
+                    'dog_name' => $formEntities->get('dog_name')->value ?? 'N/A',
+                    'dog_breed' => $formEntities->get('dog_breed')->value ?? 'N/A',
+                    'dog_age' => $formEntities->get('dog_age')->value ?? 'N/A',
+                    'dog_age_unit' => $formEntities->get('dog_age_unit')->value ?? 'N/A',
+                    'dog_color' => $formEntities->get('dog_color')->value ?? 'N/A',
+                    'dog_gender' => $formEntities->get('dog_gender')->value ?? 'N/A',
+                    'dog_weight' => $formEntities->get('dog_weight')->value ?? 'N/A',
+                    'pet_tag_number' => $formEntities->get('pet_tag_number')->value ?? 'N/A'
+                ],
+                'vaccination_details' => [
+                    'vaccination_status' => $formEntities->get('vaccination_status')->value ?? 'N/A',
+                    'vaccination_date' => $formEntities->get('vaccination_date')->value ?? 'N/A',
+                    'veterinarian_name' => $formEntities->get('veterinarian_name')->value ?? 'N/A',
+                    'veterinarian_license' => $formEntities->get('veterinarian_license')->value ?? 'N/A'
+                ],
+                'documents' => [
+                    'pet_photo_path' => $formEntities->get('pet_photo_path')->value ?? null,
+                    'owner_photo_with_pet_path' => $formEntities->get('owner_photo_with_pet_path')->value ?? null,
+                    'upload_file_path' => $formEntities->get('upload_file_path')->value ?? null,
+                    'vaccination_certificate' => $formEntities->get('vaccination_certificate')->value ?? null,
+                    'identity_proof' => $formEntities->get('identity_proof')->value ?? null
+                ],
+                'payment_details' => $payment ? [
+                    'payment_id' => $payment->payment_id,
+                    'order_id' => $payment->order_id,
+                    'amount' => $payment->amount,
+                    'status' => $payment->status,
+                    'payment_date' => $payment->created_at,
+                    'gateway_response' => $payment->response_body ? json_decode($payment->response_body, true) : null
+                ] : [
+                    'status' => 'pending',
+                    'amount' => 250.00,
+                    'message' => 'Payment not initiated yet'
+                ],
+                'declaration' => $formEntities->get('declaration')->value ?? 'N/A',
+                'all_form_data' => $formEntities->map(function($entity) {
+                    return [
+                        'parameter' => $entity->parameter,
+                        'value' => $entity->value
+                    ];
+                })->values()
+            ];
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Pet Dog Registration details retrieved successfully',
+                'data' => $response
+            ], 200);
+
+        } catch (\Exception $exception) {
+            Log::error('Pet Dog Application Details Error: ' . $exception->getMessage());
+            return response()->json([
+                'status' => 'failed',
+                'message' => 'Failed to retrieve application details',
+                'error' => $exception->getMessage()
+            ], 500);
+        }
     }
 
     /**

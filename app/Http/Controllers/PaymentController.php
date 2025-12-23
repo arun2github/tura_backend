@@ -173,13 +173,19 @@ class PaymentController extends Controller
         }
         
         $orderID = $id.rand(00000,100000);
-        $amount = 1;
         
         $requestParameter  = "1003253|DOM|IN|INR|".$amount."|Other|https://laravelv2.turamunicipalboard.com/api/successData|https://laravelv2.turamunicipalboard.com/api/successData|SBIEPAY|".$orderID."|2|NB|ONLINE|ONLINE";
 Log::warning(' eecrypted data format', ['data' => $requestParameter]);
         PaymentModel::updateOrCreate(
-            ['form_id' => $id],
-            ['request_body' => $requestParameter,'order_id' => $orderID, 'form_id' => $id]  // Data to update or create
+            ['form_id' => $data->id],
+            [
+                'request_body' => $requestParameter,
+                'order_id' => $orderID, 
+                'form_id' => $data->id,
+                'payment_id' => $orderID,
+                'amount' => $amount,
+                'form_type_id' => $data->form_id // Add form type ID
+            ]
         );
 
         // Encrypt the data

@@ -11,8 +11,13 @@ class PaymentModel extends Model
     protected $table = 'payment_details';
     
     protected $fillable = [
+        'form_id',
+        'payment_id',
         'order_id',
+        'amount',
+        'status',
         'request_body',
-        'form_id'
+        'response_body',
+        'form_type_id'
     ];
 }

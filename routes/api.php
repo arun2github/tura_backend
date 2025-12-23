@@ -82,6 +82,12 @@ Route::group(['middleware' => 'api'], function() {
     
     // Job Posting APIs - All require JWT authentication
     Route::middleware('auth')->group(function () {
+        // Pet Dog Registration Management APIs (CEO/Employee only)
+        Route::post('pet-dog/applications', [DynamicPetDogController::class, 'getAllApplications']);
+        Route::post('getPetDogApplications', [DynamicPetDogController::class, 'getAllApplications']); // Alternative route name
+        Route::post('pet-dog/application-details', [DynamicPetDogController::class, 'getApplicationDetails']);
+        Route::post('getPetDogApplicationDetails', [DynamicPetDogController::class, 'getApplicationDetails']); // Alternative route name
+        
         Route::get('jobs', [JobController::class, 'getJobs']);
         Route::post('getApplicationProgress', [JobController::class, 'getApplicationProgress']);
         Route::post('saveSelectedJobs', [JobController::class, 'saveSelectedJobs']);
