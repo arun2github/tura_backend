@@ -317,7 +317,7 @@ class DynamicPetDogController extends Controller
                 'per_page' => 'integer|min:1|max:100',
                 'page' => 'integer|min:1',
                 'status' => 'string|nullable',
-                'payment_status' => 'string|nullable|in:pending,paid,failed',
+                'payment_status' => 'string|nullable|in:pending,success,failed', // Updated to match actual DB values
                 'search' => 'string|nullable|max:100',
                 'pet_tag_search' => 'string|nullable|max:20' // Search by pet tag number
             ]);
@@ -334,7 +334,7 @@ class DynamicPetDogController extends Controller
             $perPage = $request->input('per_page', 20);
             $page = $request->input('page', 1);
             $status = $request->input('status'); // Filter by status
-            $paymentStatus = $request->input('payment_status'); // Filter by payment status: paid, pending, failed
+            $paymentStatus = $request->input('payment_status'); // Filter by payment status: success, pending, failed
             $search = $request->input('search'); // Search by application_id, owner_name, dog_name
             $petTagSearch = $request->input('pet_tag_search'); // Search specifically by pet tag number
 
@@ -354,7 +354,7 @@ class DynamicPetDogController extends Controller
                 'users.locality'
             ])
             ->leftJoin('users', 'form_master_tbl.inserted_by', '=', 'users.id')
-            ->leftJoin('payment_details', 'form_master_tbl.id', '=', 'payment_details.form_id')
+            ->leftJoin('payment_details', 'form_master_tbl.application_id', '=', 'payment_details.form_id') // Fixed: use application_id
             ->where('form_master_tbl.form_id', 0); // Pet Dog Registration
 
             // Apply filters
@@ -369,7 +369,7 @@ class DynamicPetDogController extends Controller
                         $q->whereNull('payment_details.id')
                           ->orWhere('payment_details.status', '!=', 'success');
                     });
-                } elseif ($paymentStatus === 'paid') {
+                } elseif ($paymentStatus === 'success') {
                     // Payment exists and is successful
                     $query->where('payment_details.status', 'success');
                 } elseif ($paymentStatus === 'failed') {
@@ -706,13 +706,14 @@ class DynamicPetDogController extends Controller
                 $payment->amount = $paymentAmount;
                 $payment->payment_remarks = $paymentRemarks;
                 $payment->updated_by = $user->id;
+                $payment->request_body = 'Paid at office cash';
+                $payment->response_body = 'Paid at office cash';
                 $payment->save();
-                
                 $action = 'updated';
             } else {
                 // Create new payment record
                 $payment = new PaymentModel();
-                $payment->form_id = $application->id;
+                $payment->form_id = $application->application_id; // Use application_id for manual payment
                 $payment->form_type_id = 0; // Pet Dog Registration
                 $payment->payment_id = 'MANUAL_' . $applicationId . '_' . time();
                 $payment->order_id = 'ORDER_' . $applicationId . '_' . time();
@@ -721,8 +722,9 @@ class DynamicPetDogController extends Controller
                 $payment->payment_remarks = $paymentRemarks;
                 $payment->created_by = $user->id;
                 $payment->updated_by = $user->id;
+                $payment->request_body = 'Paid at office cash';
+                $payment->response_body = 'Paid at office cash';
                 $payment->save();
-                
                 $action = 'created';
             }
 
