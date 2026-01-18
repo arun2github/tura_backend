@@ -22,6 +22,10 @@ class PetDogRegistration extends Model
         'dog_name',
         'dog_breed',
         'address',
+        'ward_no',
+        'district',
+        'pincode',
+        'registration_date',
         'vaccination_card_document',
         'dog_photo_document',
         'registration_fee',
@@ -39,6 +43,7 @@ class PetDogRegistration extends Model
 
     protected $casts = [
         'approved_at' => 'datetime',
+        'registration_date' => 'date',
         'registration_fee' => 'decimal:2',
         'metal_tag_fee' => 'decimal:2',
         'total_fee' => 'decimal:2',

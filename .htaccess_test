@@ -1,0 +1,10 @@
+# Hostinger Directory Structure Test
+# This file tests if .htaccess rules are being processed
+
+RewriteEngine On
+
+# Test rule - redirect test_htaccess to show htaccess is working
+RewriteRule ^test_htaccess$ htaccess_working.php [L]
+
+# Laravel routing rules
+RewriteRule ^(.*)$ public/$1 [L]

@@ -1531,15 +1531,48 @@ class FormController extends Controller
             $registrationNumber = 'PDR-' . date('Y') . '-' . str_pad($formMaster->id, 4, '0', STR_PAD_LEFT);
 
             // Get pet tag number from form data
-            $petTagNumber = $formData['pet_tag_number'] ?? 'TMB-1';
+            $petTagNumber = $formData['pet_tag_number'] ?? 'TMB-' . str_pad($formMaster->id, 3, '0', STR_PAD_LEFT);
 
-            // Prepare data for certificate
-            $certificateData = array_merge($formData, [
-                'logo_path' => storage_path('app/public/email/turaLogo.png'),
+            // Prepare certificate data with proper field mapping
+            $certificateData = [
+                // Registration details
                 'registration_number' => $registrationNumber,
                 'pet_tag_number' => $petTagNumber,
-                'application_id' => $request->application_id
-            ]);
+                'registration_date' => $formData['registration_date'] ?? date('Y-m-d'),
+                'application_id' => $request->application_id,
+                
+                // Owner details
+                'owner_name' => $formData['owner_name'] ?? '',
+                'owner_phone' => $formData['owner_phone'] ?? '',
+                'owner_email' => $formData['owner_email'] ?? '',
+                'owner_aadhar_number' => $formData['owner_aadhar_number'] ?? '',
+                'owner_address' => $formData['owner_address'] ?? '',
+                'ward_no' => $formData['ward_no'] ?? '',
+                'district' => $formData['district'] ?? 'West Garo Hills',
+                'pincode' => $formData['pincode'] ?? '',
+                
+                // Pet details
+                'dog_name' => $formData['dog_name'] ?? '',
+                'dog_breed' => $formData['dog_breed'] ?? '',
+                'dog_age' => $formData['dog_age'] ?? '',
+                'dog_age_unit' => $formData['dog_age_unit'] ?? 'years',
+                'dog_gender' => $formData['dog_gender'] ?? '',
+                'dog_color' => $formData['dog_color'] ?? '',
+                'dog_weight' => $formData['dog_weight'] ?? '',
+                
+                // Vaccination details  
+                'vaccination_status' => $formData['vaccination_status'] ?? '',
+                'vaccination_date' => $formData['vaccination_date'] ?? '',
+                
+                // Fee details
+                'total_fee' => '250',
+                
+                // Photo data - support both base64 and file paths
+                'pet_photo_base64' => $this->processBase64Image($formData['pet_photo_base64'] ?? null),
+                'pet_photo_path' => $formData['pet_photo_path'] ?? null,
+                'owner_photo_base64' => $this->processBase64Image($formData['owner_photo_base64'] ?? null),
+                'owner_photo_path' => $formData['owner_photo_path'] ?? null,
+            ];
 
             // Generate PDF using DomPDF
             $pdf = \PDF::loadView('pdf.pet_dog_certificate', $certificateData);
@@ -1688,20 +1721,24 @@ class FormController extends Controller
         }
     }
 
+    /**
+     * Process base64 image data for PDF display
+     * Same method as used in AdmitCardController
+     */
+    private function processBase64Image($base64Data)
+    {
+        if (!$base64Data) {
+            return null;
+        }
 
+        // Remove data:image/jpeg;base64, prefix if present
+        $base64Data = preg_replace('/^data:image\/[^;]+;base64,/', '', $base64Data);
+        
+        // Validate base64 data
+        if (!base64_decode($base64Data, true)) {
+            return null;
+        }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        return $base64Data;
+    }
 }

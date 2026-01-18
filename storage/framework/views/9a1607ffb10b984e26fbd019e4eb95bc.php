@@ -8,9 +8,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-@php
+<?php
     use Illuminate\Support\Facades\Log;
-@endphp
+?>
 
     <style>
         
@@ -274,14 +274,14 @@
         <div class="header-section">
             <div class="header-flex">
                 <div class="header-left">
-                    @php
+                    <?php
                         $defaultLogoPath = public_path('images/email/logo.png');
-                    @endphp
-                    @if(file_exists($defaultLogoPath))
-                        <img src="{{ asset('images/email/logo.png') }}" class="logo" alt="Logo">
-                    @else
+                    ?>
+                    <?php if(file_exists($defaultLogoPath)): ?>
+                        <img src="<?php echo e(asset('images/email/logo.png')); ?>" class="logo" alt="Logo">
+                    <?php else: ?>
                         <div class="logo" style="border:1px solid #000; display:flex; align-items:center; justify-content:center; font-size:6px; font-weight:bold; width:50px; height:50px;">LOGO</div>
-                    @endif
+                    <?php endif; ?>
                 </div>
                 <div class="header-center">
                     <div class="header-text">
@@ -299,9 +299,9 @@
 
         <!-- Registration Number and Date -->
         <div class="reg-number-date">
-            <div class="reg-cell">PET REGISTRATION NO {{ $registration_number ?? '' }}</div>
-            <div class="reg-cell">PET TAG NO {{ $pet_tag_number ?? '' }}</div>
-            <div class="reg-cell">DATE OF REGISTRATION {{ isset($registration_date) && $registration_date ? date('d/m/Y', strtotime($registration_date)) : date('d/m/Y') }}</div>
+            <div class="reg-cell">PET REGISTRATION NO <?php echo e($registration_number ?? ''); ?></div>
+            <div class="reg-cell">PET TAG NO <?php echo e($pet_tag_number ?? ''); ?></div>
+            <div class="reg-cell">DATE OF REGISTRATION <?php echo e(isset($registration_date) && $registration_date ? date('d/m/Y', strtotime($registration_date)) : date('d/m/Y')); ?></div>
         </div>
 
         <div class="description">
@@ -314,47 +314,47 @@
         <div class="info-row">
             <div class="info-item">
                 <span class="field-label">Owner Name</span>
-                <span class="field-value">{{ isset($owner_name) && $owner_name ? strtoupper($owner_name) : '' }}</span>
+                <span class="field-value"><?php echo e(isset($owner_name) && $owner_name ? strtoupper($owner_name) : ''); ?></span>
             </div>
             <div class="info-item">
                 <span class="field-label">Contact Number</span>
-                <span class="field-value">{{ $owner_phone ?? '' }}</span>
+                <span class="field-value"><?php echo e($owner_phone ?? ''); ?></span>
             </div>
         </div>
 
         <div class="info-row">
             <div class="info-item">
                 <span class="field-label">Email Address</span>
-                <span class="field-value">{{ $owner_email ?? '' }}</span>
+                <span class="field-value"><?php echo e($owner_email ?? ''); ?></span>
             </div>
             <div class="info-item">
                 <span class="field-label">Document ID</span>
-                <span class="field-value">{{ $owner_aadhar_number ?? '' }}</span>
+                <span class="field-value"><?php echo e($owner_aadhar_number ?? ''); ?></span>
             </div>
         </div>
 
         <div class="info-row">
             <div class="info-item full-width" style="width: 100%;">
                 <span class="field-label">Residential Address</span>
-                <span class="field-value" style="min-width: 300px;">{{ $owner_address ?? '' }}</span>
+                <span class="field-value" style="min-width: 300px;"><?php echo e($owner_address ?? ''); ?></span>
             </div>
         </div>
 
         <div class="info-row">
             <div class="info-item">
                 <span class="field-label">Ward No</span>
-                <span class="field-value">{{ $ward_no ?? '' }}</span>
+                <span class="field-value"><?php echo e($ward_no ?? ''); ?></span>
             </div>
             <div class="info-item">
                 <span class="field-label">District</span>
-                <span class="field-value">{{ $district ?? 'West Garo Hills' }}</span>
+                <span class="field-value"><?php echo e($district ?? 'West Garo Hills'); ?></span>
             </div>
         </div>
 
         <div class="info-row">
             <div class="info-item">
                 <span class="field-label">Pincode</span>
-                <span class="field-value">{{ $pincode ?? '' }}</span>
+                <span class="field-value"><?php echo e($pincode ?? ''); ?></span>
             </div>
             <div class="info-item"></div>
         </div>
@@ -365,40 +365,40 @@
         <div class="info-row">
             <div class="info-item">
                 <span class="field-label">Name of Dog</span>
-                <span class="field-value">{{ isset($dog_name) && $dog_name ? strtoupper($dog_name) : '' }}</span>
+                <span class="field-value"><?php echo e(isset($dog_name) && $dog_name ? strtoupper($dog_name) : ''); ?></span>
             </div>
             <div class="info-item">
                 <span class="field-label">Gender of Dog</span>
-                <span class="field-value">{{ isset($dog_gender) && $dog_gender ? ucfirst($dog_gender) : '' }}</span>
+                <span class="field-value"><?php echo e(isset($dog_gender) && $dog_gender ? ucfirst($dog_gender) : ''); ?></span>
             </div>
         </div>
 
         <div class="info-row">
             <div class="info-item">
                 <span class="field-label">Breed of Dog</span>
-                <span class="field-value">{{ $dog_breed ?? '' }}</span>
+                <span class="field-value"><?php echo e($dog_breed ?? ''); ?></span>
             </div>
             <div class="info-item">
                 <span class="field-label">Age at Registration</span>
-                <span class="field-value">{{ isset($dog_age) && $dog_age ? $dog_age . ' ' . ($dog_age_unit ?? 'year(s)') : '' }}</span>
+                <span class="field-value"><?php echo e(isset($dog_age) && $dog_age ? $dog_age . ' ' . ($dog_age_unit ?? 'year(s)') : ''); ?></span>
             </div>
         </div>
 
         <div class="info-row">
             <div class="info-item">
                 <span class="field-label">Color</span>
-                <span class="field-value">{{ $dog_color ?? '' }}</span>
+                <span class="field-value"><?php echo e($dog_color ?? ''); ?></span>
             </div>
             <div class="info-item">
                 <span class="field-label">Weight</span>
-                <span class="field-value">{{ isset($dog_weight) && $dog_weight ? $dog_weight . ' kg' : '' }}</span>
+                <span class="field-value"><?php echo e(isset($dog_weight) && $dog_weight ? $dog_weight . ' kg' : ''); ?></span>
             </div>
         </div>
 
         <div class="info-row">
             <div class="info-item">
                 <span class="field-label">Vaccination Status</span>
-                <span class="field-value">{{ isset($vaccination_status) && $vaccination_status ? ucfirst($vaccination_status) : '' }}</span>
+                <span class="field-value"><?php echo e(isset($vaccination_status) && $vaccination_status ? ucfirst($vaccination_status) : ''); ?></span>
             </div>
             <div class="info-item"></div>
         </div>
@@ -408,10 +408,10 @@
             <div class="photo-container">
                 <div class="photo-title">DOG'S PHOTO</div>
                 <div class="photo-frame">
-                    @if(isset($pet_photo_base64) && $pet_photo_base64)
-                        <img src="data:image/jpeg;base64,{{ $pet_photo_base64 }}" class="photo" alt="Dog Photo">
-                    @elseif(isset($pet_photo_path) && $pet_photo_path)
-                        @php
+                    <?php if(isset($pet_photo_base64) && $pet_photo_base64): ?>
+                        <img src="data:image/jpeg;base64,<?php echo e($pet_photo_base64); ?>" class="photo" alt="Dog Photo">
+                    <?php elseif(isset($pet_photo_path) && $pet_photo_path): ?>
+                        <?php
                             // Try different path combinations for debugging
                             $storagePath = storage_path('app/public/' . $pet_photo_path);
                             $publicPath = public_path('storage/' . $pet_photo_path);
@@ -438,16 +438,16 @@
                             }
                             
                             Log::info('Final path chosen: ' . ($finalPath ?? 'NONE'));
-                        @endphp
+                        ?>
                         
-                        @if($finalPath)
-                            <img src="{{ $finalPath }}" class="photo" alt="Dog Photo">
-                        @else
-                            <div class="no-photo">Photo Not Found<br><small style="font-size:6px;">{{ $pet_photo_path }}</small></div>
-                        @endif
-                    @else
+                        <?php if($finalPath): ?>
+                            <img src="<?php echo e($finalPath); ?>" class="photo" alt="Dog Photo">
+                        <?php else: ?>
+                            <div class="no-photo">Photo Not Found<br><small style="font-size:6px;"><?php echo e($pet_photo_path); ?></small></div>
+                        <?php endif; ?>
+                    <?php else: ?>
                         <div class="no-photo">No Photo</div>
-                    @endif
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -459,11 +459,11 @@
         <div class="info-row">
             <div class="info-item">
                 <span class="field-label">Fees Paid in Rupees</span>
-                <span class="field-value">{{ isset($total_fee) && $total_fee ? $total_fee : '250' }}</span>
+                <span class="field-value"><?php echo e(isset($total_fee) && $total_fee ? $total_fee : '250'); ?></span>
             </div>
             <div class="info-item">
                 <span class="field-label">Registration Certificate Valid Upto</span>
-                <span class="field-value">{{ isset($registration_date) && $registration_date ? date('d/m/Y', strtotime($registration_date . ' +1 year')) : date('d/m/Y', strtotime('+1 year')) }}</span>
+                <span class="field-value"><?php echo e(isset($registration_date) && $registration_date ? date('d/m/Y', strtotime($registration_date . ' +1 year')) : date('d/m/Y', strtotime('+1 year'))); ?></span>
             </div>
         </div>
 
@@ -474,14 +474,14 @@
 
         <!-- CEO Signature -->
         <div class="signature-section">
-            @php
+            <?php
                 $ceoSignPath = public_path('images/email/CEO_SIGN.png');
-            @endphp
-            @if(file_exists($ceoSignPath))
-                <img src="{{ asset('images/email/CEO_SIGN.png') }}" class="signature-image" alt="CEO Signature">
-            @else
+            ?>
+            <?php if(file_exists($ceoSignPath)): ?>
+                <img src="<?php echo e(asset('images/email/CEO_SIGN.png')); ?>" class="signature-image" alt="CEO Signature">
+            <?php else: ?>
                 <div class="signature-line"></div>
-            @endif
+            <?php endif; ?>
             <div class="signature-title">Chief Executive Officer</div>
             <div class="signature-subtitle">Tura Municipal Board</div>
         </div>
@@ -493,4 +493,4 @@
         </div>
     </div>
 </body>
-</html>
+</html><?php /**PATH /Users/Prem/tura_backend/tura_backend/resources/views/pdf/pet_dog_certificate.blade.php ENDPATH**/ ?>

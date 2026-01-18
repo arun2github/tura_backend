@@ -29,6 +29,9 @@ class DynamicPetDogController extends Controller
                 'owner_phone' => 'required|string|min:10|max:15',
                 'owner_email' => 'required|email|max:100',
                 'owner_address' => 'required|string|between:10,300',
+                'ward_no' => 'required|string|between:1,50',
+                'district' => 'nullable|string|max:100', // Optional, will default to "West Garo Hills"
+                'pincode' => 'required|string|size:6',
                 'owner_aadhar_number' => 'required|string|size:12',
                 'dog_name' => 'nullable|string|between:2,50',
                 'dog_breed' => 'nullable|string|between:2,50',
@@ -44,7 +47,6 @@ class DynamicPetDogController extends Controller
                 'upload_files' => 'sometimes|array', // Make optional
                 'document_list' => 'sometimes|array', // Make optional
                 'pet_photo' => 'required|string', // base64 string required
-                'owner_photo_with_pet' => 'required|string', // base64 string required
                 'declaration' => 'required|string|min:1', // Accept any non-empty string
             ]);
 
@@ -89,16 +91,28 @@ class DynamicPetDogController extends Controller
             $fileName = date('Ymdhis');
             $file_path = 'uploads/' . $fileName;
             $pet_photo_path = null;
-            $owner_photo_with_pet_path = null;
 
-            // Save all fields except pet_photo and owner_photo_with_pet
+            // Auto-generate registration date as today's date
+            $registration_date = date('Y-m-d'); // Store in YYYY-MM-DD format for database
+
+            // Set default district if not provided
+            $district = $request->district ?: 'West Garo Hills';
+
+            Log::info('Pet Dog Registration - New fields processing', [
+                'registration_date' => $registration_date,
+                'ward_no' => $request->ward_no,
+                'district' => $district,
+                'pincode' => $request->pincode
+            ]);
+
+            // Save all fields except pet_photo
             foreach($request->all() as $key => $req) {
                 if ($key === 'pet_photo') {
-                    // Process pet photo base64
+                    // Process and save pet photo file (for backup)
                     $pet_photo_path = $this->processBase64Document($req, $file_path, 'pet_photo.jpg');
-                } else if ($key === 'owner_photo_with_pet') {
-                    // Process owner photo with pet base64
-                    $owner_photo_with_pet_path = $this->processBase64Document($req, $file_path, 'owner_photo_with_pet.jpg');
+                    
+                    // Also store the original base64 string (for PDF generation)
+                    $pet_photo_base64 = $req; // Store original base64 string
                 } else if ($key == "upload_files" || $key == "form_id") {
                     if ($request->hasFile('upload_files')) {
                         $files = $request->file('upload_files');
@@ -135,6 +149,22 @@ class DynamicPetDogController extends Controller
                 }
             }
 
+            // Add registration date
+            $formData[] = [
+                'parameter' => 'registration_date',
+                'value' => $registration_date,
+                'form_id' => $form_id,
+                'form_type_id' => $request->form_id
+            ];
+
+            // Add district (with default value)
+            $formData[] = [
+                'parameter' => 'district',
+                'value' => $district,
+                'form_id' => $form_id,
+                'form_type_id' => $request->form_id
+            ];
+
             // Add file path parameter
             $formData[] = [
                 'parameter' => 'upload_file_path',
@@ -149,17 +179,17 @@ class DynamicPetDogController extends Controller
                 'form_id' => $form_id,
                 'form_type_id' => $request->form_id
             ];
-            // Add pet photo path
+            // Add pet photo path (for backup/file storage)
             $formData[] = [
                 'parameter' => 'pet_photo_path',
                 'value' => $pet_photo_path ?? '',
                 'form_id' => $form_id,
                 'form_type_id' => $request->form_id
             ];
-            // Add owner photo with pet path
+            // Add pet photo base64 (for PDF generation)
             $formData[] = [
-                'parameter' => 'owner_photo_with_pet_path',
-                'value' => $owner_photo_with_pet_path ?? '',
+                'parameter' => 'pet_photo_base64',
+                'value' => $pet_photo_base64 ?? '',
                 'form_id' => $form_id,
                 'form_type_id' => $request->form_id
             ];
@@ -288,7 +318,8 @@ class DynamicPetDogController extends Controller
                 'page' => 'integer|min:1',
                 'status' => 'string|nullable',
                 'payment_status' => 'string|nullable|in:pending,paid,failed',
-                'search' => 'string|nullable|max:100'
+                'search' => 'string|nullable|max:100',
+                'pet_tag_search' => 'string|nullable|max:20' // Search by pet tag number
             ]);
 
             if ($validator->fails()) {
@@ -305,6 +336,7 @@ class DynamicPetDogController extends Controller
             $status = $request->input('status'); // Filter by status
             $paymentStatus = $request->input('payment_status'); // Filter by payment status: paid, pending, failed
             $search = $request->input('search'); // Search by application_id, owner_name, dog_name
+            $petTagSearch = $request->input('pet_tag_search'); // Search specifically by pet tag number
 
             // Base query
             $query = FormMasterTblModel::select([
@@ -365,6 +397,17 @@ class DynamicPetDogController extends Controller
                 });
             }
 
+            // Separate filter for pet tag search
+            if ($petTagSearch) {
+                $query->whereExists(function($subQ) use ($petTagSearch) {
+                    $subQ->select(\DB::raw(1))
+                         ->from('form_entity')
+                         ->whereColumn('form_entity.form_id', 'form_master_tbl.id')
+                         ->where('form_entity.parameter', 'pet_tag_number')
+                         ->where('form_entity.value', 'LIKE', "%{$petTagSearch}%");
+                });
+            }
+
             // Get total count (clone query before applying pagination)
             $countQuery = clone $query;
             $total = $countQuery->distinct('form_master_tbl.id')->count('form_master_tbl.id');
@@ -385,8 +428,18 @@ class DynamicPetDogController extends Controller
                     ->get()
                     ->keyBy('parameter');
 
-                // Get payment status
-                $payment = PaymentModel::where('form_id', $app->id)->first();
+                // Get payment status - use application_id since form_id in payment_details stores application_id
+                $payment = PaymentModel::where('form_id', $app->application_id)->first();
+                
+                // Log payment debug info
+                Log::info("Payment Debug for {$app->application_id}:", [
+                    'app_id' => $app->id,
+                    'app_application_id' => $app->application_id,
+                    'payment_found' => $payment ? 'YES' : 'NO',
+                    'payment_status' => $payment ? $payment->status : 'N/A',
+                    'payment_amount' => $payment ? $payment->amount : 'N/A',
+                    'payment_record' => $payment ? $payment->toArray() : 'NULL'
+                ]);
 
                 $result[] = [
                     'id' => $app->id,
@@ -406,6 +459,11 @@ class DynamicPetDogController extends Controller
                         'owner_name' => $formData->get('owner_name')->value ?? 'N/A',
                         'owner_email' => $formData->get('owner_email')->value ?? 'N/A',
                         'owner_phone' => $formData->get('owner_phone')->value ?? 'N/A',
+                        'owner_address' => $formData->get('owner_address')->value ?? 'N/A',
+                        'ward_no' => $formData->get('ward_no')->value ?? 'N/A',
+                        'district' => $formData->get('district')->value ?? 'West Garo Hills',
+                        'pincode' => $formData->get('pincode')->value ?? 'N/A',
+                        'registration_date' => $formData->get('registration_date')->value ?? date('Y-m-d'),
                         'dog_name' => $formData->get('dog_name')->value ?? 'N/A',
                         'dog_breed' => $formData->get('dog_breed')->value ?? 'N/A',
                         'pet_tag_number' => $formData->get('pet_tag_number')->value ?? 'N/A',
@@ -497,8 +555,8 @@ class DynamicPetDogController extends Controller
             // Get all form entity data
             $formEntities = FormEntityModel::where('form_id', $id)->get()->keyBy('parameter');
 
-            // Get payment details
-            $payment = PaymentModel::where('form_id', $id)->first();
+            // Get payment details - use application_id since form_id in payment_details stores application_id
+            $payment = PaymentModel::where('form_id', $application->application_id)->first();
 
             // Structure the response
             $response = [
@@ -549,6 +607,7 @@ class DynamicPetDogController extends Controller
                 ],
                 'documents' => [
                     'pet_photo_path' => $formEntities->get('pet_photo_path')->value ?? null,
+                    'pet_photo_base64' => $formEntities->get('pet_photo_base64')->value ?? null,
                     'owner_photo_with_pet_path' => $formEntities->get('owner_photo_with_pet_path')->value ?? null,
                     'upload_file_path' => $formEntities->get('upload_file_path')->value ?? null,
                     'vaccination_certificate' => $formEntities->get('vaccination_certificate')->value ?? null,
@@ -586,6 +645,115 @@ class DynamicPetDogController extends Controller
             return response()->json([
                 'status' => 'failed',
                 'message' => 'Failed to retrieve application details',
+                'error' => $exception->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update Payment Status for Pet Dog Registration (for CEO/Employee)
+     * POST /api/pet-dog/update-payment-status
+     */
+    public function updatePaymentStatus(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            if (!$user || !in_array($user->role, ['ceo', 'editor'])) {
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Unauthorized access. CEO/Employee access required.',
+                ], 403);
+            }
+
+            // Validate JSON request
+            $validator = Validator::make($request->all(), [
+                'application_id' => 'required|string',
+                'payment_status' => 'required|in:pending,success,failed',
+                'payment_remarks' => 'nullable|string|max:500'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Validation Failed',
+                    'errors' => $validator->errors()->toArray(),
+                ], 400);
+            }
+
+            $applicationId = $request->input('application_id');
+            $paymentStatus = $request->input('payment_status');
+            $paymentAmount = 250.00; // Fixed amount for pet dog registration
+            $paymentRemarks = $request->input('payment_remarks', '');
+
+            // Get application details
+            $application = FormMasterTblModel::where('application_id', $applicationId)
+                ->where('form_id', 0) // Pet Dog Registration
+                ->first();
+
+            if (!$application) {
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Pet Dog Registration application not found'
+                ], 404);
+            }
+
+            // Check if payment record exists - use application_id since form_id in payment_details stores application_id
+            $payment = PaymentModel::where('form_id', $application->application_id)->first();
+
+            if ($payment) {
+                // Update existing payment record
+                $payment->status = $paymentStatus;
+                $payment->amount = $paymentAmount;
+                $payment->payment_remarks = $paymentRemarks;
+                $payment->updated_by = $user->id;
+                $payment->save();
+                
+                $action = 'updated';
+            } else {
+                // Create new payment record
+                $payment = new PaymentModel();
+                $payment->form_id = $application->id;
+                $payment->form_type_id = 0; // Pet Dog Registration
+                $payment->payment_id = 'MANUAL_' . $applicationId . '_' . time();
+                $payment->order_id = 'ORDER_' . $applicationId . '_' . time();
+                $payment->amount = $paymentAmount;
+                $payment->status = $paymentStatus;
+                $payment->payment_remarks = $paymentRemarks;
+                $payment->created_by = $user->id;
+                $payment->updated_by = $user->id;
+                $payment->save();
+                
+                $action = 'created';
+            }
+
+            // Log the payment status change
+            Log::info("Pet Dog Registration Payment Status {$action}", [
+                'application_id' => $applicationId,
+                'form_id' => $application->id,
+                'payment_status' => $paymentStatus,
+                'amount' => $paymentAmount,
+                'updated_by' => $user->email,
+                'remarks' => $paymentRemarks
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Payment status {$action} successfully",
+                'data' => [
+                    'application_id' => $applicationId,
+                    'payment_status' => $paymentStatus,
+                    'payment_amount' => $paymentAmount,
+                    'payment_id' => $payment->payment_id,
+                    'updated_by' => $user->firstname . ' ' . $user->lastname,
+                    'updated_at' => $payment->updated_at
+                ]
+            ], 200);
+
+        } catch (\Exception $exception) {
+            Log::error('Pet Dog Payment Status Update Error: ' . $exception->getMessage());
+            return response()->json([
+                'status' => 'failed',
+                'message' => 'Failed to update payment status',
                 'error' => $exception->getMessage()
             ], 500);
         }

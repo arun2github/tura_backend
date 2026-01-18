@@ -25,14 +25,25 @@ return new class extends Migration
             $table->string('category', 20)->nullable();
             $table->string('email', 255)->nullable();
             $table->string('phone', 50)->nullable();
-            $table->date('exam_date');
-            $table->time('exam_start_time')->nullable();
-            $table->time('exam_end_time')->nullable();
-            $table->time('reporting_time')->nullable();
             $table->string('venue_name', 255);
             $table->text('venue_address');
             $table->longText('photo_base64')->nullable();
             $table->string('job_title', 255);
+            
+            // Slot 1 fields
+            $table->string('subject_slot_1', 255)->nullable();
+            $table->date('exam_date_slot_1')->nullable();
+            $table->time('exam_start_time_slot_1')->nullable();
+            $table->time('exam_end_time_slot_1')->nullable();
+            $table->time('reporting_time_slot_1')->nullable();
+            
+            // Slot 2 fields
+            $table->string('subject_slot_2', 255)->nullable();
+            $table->date('exam_date_slot_2')->nullable();
+            $table->time('exam_start_time_slot_2')->nullable();
+            $table->time('exam_end_time_slot_2')->nullable();
+            $table->time('reporting_time_slot_2')->nullable();
+            
             $table->datetime('pdf_downloaded_at')->nullable();
             $table->enum('status', ['active', 'cancelled', 'reissued'])->default('active');
             $table->datetime('issued_at')->nullable();
@@ -44,7 +55,6 @@ return new class extends Migration
             $table->index('user_id');
             $table->index('admit_no');
             $table->index('roll_number');
-            $table->index('exam_date');
         });
     }
 

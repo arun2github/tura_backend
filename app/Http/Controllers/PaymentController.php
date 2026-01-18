@@ -64,7 +64,13 @@ class PaymentController extends Controller
         ], 404); // Return 404 if form_id is not in the valid list
     }
     
-    $amount = "";
+    $amount = 0; // Initialize as 0 instead of empty string
+
+        Log::info('Payment calculation started', [
+            'application_id' => $id,
+            'form_id' => $data->form_id,
+            'form_database_id' => $data->id
+        ]);
 
         // Handling specific cases for form_id 5 or 7
         if (in_array($data->form_id, [5, 7])) {
@@ -73,6 +79,11 @@ class PaymentController extends Controller
                                           ->first();
     
             if (!$formEntity) {
+                Log::error('Form entity not found for trade license', [
+                    'form_id' => $data->form_id,
+                    'database_id' => $data->id,
+                    'parameter' => 'type_of_trade'
+                ]);
                 return response()->json([
                     'status' => 'failed',
                     'message' => 'Form entity not found.',
@@ -82,18 +93,33 @@ class PaymentController extends Controller
             // Find fees associated with the trade license fee
             $fees = TradeLicenseFee::where('trade_type', $formEntity->value)->first();
     
-            // If necessary, you can log or debug the $formEntity for analysis.
-            Log::info('Form Entity Found', ['formEntity' => $formEntity]);
+            if (!$fees) {
+                Log::error('Trade license fee not found', [
+                    'trade_type' => $formEntity->value,
+                    'form_entity' => $formEntity
+                ]);
+                return response()->json([
+                    'status' => 'failed',
+                    'message' => 'Trade license fee not found for this trade type.',
+                ], 404);
+            }
     
-            // Example debug: Removing dd() for production
-            //dd($fees); // Avoid using dd() in production. Use logging instead if needed.
-            $amount = $fees->license_fee;
+            $amount = (float) $fees->license_fee;
+            Log::info('Trade license fee calculated', [
+                'trade_type' => $formEntity->value,
+                'calculated_amount' => $amount
+            ]);
         }else if($data->form_id == 8){
              $formEntity = FormEntityModel::where('parameter', 'water_tanker_list')
                                           ->where('form_id', $data->id)
                                           ->first();
     
             if (!$formEntity) {
+                Log::error('Form entity not found for water tanker', [
+                    'form_id' => $data->form_id,
+                    'database_id' => $data->id,
+                    'parameter' => 'water_tanker_list'
+                ]);
                 return response()->json([
                     'status' => 'failed',
                     'message' => 'Form entity not found.',
@@ -110,8 +136,21 @@ class PaymentController extends Controller
             
                 // If a match is found, remove commas and convert to integer
                 if (isset($matches[1])) {
-                    $amount = (int) str_replace(',', '', $matches[1]);
+                    $amount = (float) str_replace(',', '', $matches[1]);
+                    Log::info('Water tanker fee calculated', [
+                        'fee_string' => $fees[0],
+                        'calculated_amount' => $amount
+                    ]);
+                } else {
+                    Log::error('Could not extract amount from water tanker fee string', [
+                        'fee_string' => $fees[0]
+                    ]);
                 }
+            } else {
+                Log::error('Water tanker fee array is empty', [
+                    'fee_array' => $fees,
+                    'raw_value' => $feeArray
+                ]);
             }
         }else if($data->form_id == 6){
              $formEntity = FormEntityModel::whereIn('parameter', ['cesspoolTankerGeneral','cesspoolTankerGoverment','cesspoolTankerOutsideMuni'])
@@ -119,6 +158,11 @@ class PaymentController extends Controller
                                           ->first();
     
             if (!$formEntity) {
+                Log::error('Form entity not found for cesspool tanker', [
+                    'form_id' => $data->form_id,
+                    'database_id' => $data->id,
+                    'parameters' => ['cesspoolTankerGeneral','cesspoolTankerGoverment','cesspoolTankerOutsideMuni']
+                ]);
                 return response()->json([
                     'status' => 'failed',
                     'message' => 'Form entity not found.',
@@ -135,12 +179,27 @@ class PaymentController extends Controller
             
                 // If a match is found, remove commas and convert to integer
                 if (isset($matches[1])) {
-                    $amount = (int) str_replace(',', '', $matches[1]);
+                    $amount = (float) str_replace(',', '', $matches[1]);
+                    Log::info('Cesspool tanker fee calculated', [
+                        'fee_string' => $fees[0],
+                        'calculated_amount' => $amount,
+                        'parameter' => $formEntity->parameter
+                    ]);
+                } else {
+                    Log::error('Could not extract amount from cesspool tanker fee string', [
+                        'fee_string' => $fees[0]
+                    ]);
                 }
+            } else {
+                Log::error('Cesspool tanker fee array is empty', [
+                    'fee_array' => $fees,
+                    'raw_value' => $feeArray
+                ]);
             }
         }else if($data->form_id == 0){
             // Pet Dog Registration - Fixed amount ₹250
             $amount = 250;
+            Log::info('Pet dog registration fee set', ['amount' => $amount]);
         }else if($data->form_id == 10){
             $formEntity = FormEntityModel::where('parameter', 'requirementTypeOf')
                                           ->where('form_id', $data->id)
@@ -172,21 +231,137 @@ class PaymentController extends Controller
             
         }
         
+        // Ensure amount is properly set - default to 0 if null/empty
+        if (empty($amount) || $amount == "" || $amount == 0) {
+            Log::warning('Payment amount is empty or zero', [
+                'application_id' => $id,
+                'form_id' => $data->form_id,
+                'form_database_id' => $data->id,
+                'calculated_amount' => $amount,
+                'amount_type' => gettype($amount)
+            ]);
+            
+            // Don't set to 0 - return error instead for debugging
+            return response()->json([
+                'status' => 'failed',
+                'message' => 'Unable to calculate payment amount. Please check form data.',
+                'debug' => [
+                    'form_id' => $data->form_id,
+                    'application_id' => $id,
+                    'amount' => $amount
+                ]
+            ], 400);
+        }
+        
         $orderID = $id.rand(00000,100000);
         
         $requestParameter  = "1003253|DOM|IN|INR|".$amount."|Other|https://laravelv2.turamunicipalboard.com/api/successData|https://laravelv2.turamunicipalboard.com/api/successData|SBIEPAY|".$orderID."|2|NB|ONLINE|ONLINE";
-Log::warning(' eecrypted data format', ['data' => $requestParameter]);
-        PaymentModel::updateOrCreate(
-            ['form_id' => $data->id],
-            [
-                'request_body' => $requestParameter,
-                'order_id' => $orderID, 
-                'form_id' => $data->id,
-                'payment_id' => $orderID,
-                'amount' => $amount,
-                'form_type_id' => $data->form_id // Add form type ID
-            ]
-        );
+        
+        Log::info('Payment record creation', [
+            'data' => $requestParameter,
+            'application_id' => $id,
+            'form_database_id' => $data->id,
+            'form_type_id' => $data->form_id,
+            'amount' => $amount,
+            'order_id' => $orderID
+        ]);
+        
+        // Debug the exact data being passed to updateOrCreate
+        $updateData = [
+            'request_body' => $requestParameter,
+            'order_id' => $orderID, 
+            'form_id' => $id, // Use application_id instead of database id
+            'payment_id' => $orderID,
+            'amount' => (float) $amount, // Ensure it's a float
+            'form_type_id' => (int) $data->form_id // Ensure it's an integer
+        ];
+        
+        Log::info('PaymentModel updateOrCreate data', [
+            'search_criteria' => ['form_id' => $id],
+            'update_data' => $updateData
+        ]);
+        
+        // Check if record exists first
+        $existingRecord = PaymentModel::where('form_id', $id)->first();
+        if ($existingRecord) {
+            Log::info('Existing payment record found', [
+                'existing_record' => $existingRecord->toArray()
+            ]);
+            
+            // CHECKPOINT: Verify we reach this code section
+            Log::error('CHECKPOINT: About to attempt update', [
+                'record_id' => $existingRecord->id,
+                'update_data' => $updateData
+            ]);
+            
+            // Try to update the existing record explicitly with detailed logging
+            try {
+                Log::info('Attempting to update existing record', [
+                    'record_id' => $existingRecord->id,
+                    'current_values' => [
+                        'payment_id' => $existingRecord->payment_id,
+                        'amount' => $existingRecord->amount,
+                        'form_type_id' => $existingRecord->form_type_id
+                    ],
+                    'new_values' => $updateData
+                ]);
+                
+                // Try direct field assignment first
+                $existingRecord->payment_id = $updateData['payment_id'];
+                $existingRecord->amount = $updateData['amount'];
+                $existingRecord->form_type_id = $updateData['form_type_id'];
+                $existingRecord->order_id = $updateData['order_id'];
+                $existingRecord->request_body = $updateData['request_body'];
+                
+                Log::info('Direct field assignment done', [
+                    'payment_id' => $existingRecord->payment_id,
+                    'amount' => $existingRecord->amount,
+                    'form_type_id' => $existingRecord->form_type_id
+                ]);
+                
+                $saveResult = $existingRecord->save();
+                
+                Log::info('Save result', [
+                    'save_success' => $saveResult,
+                    'record_after_save' => $existingRecord->fresh()->toArray()
+                ]);
+                
+                $paymentRecord = $existingRecord->fresh(); // Get fresh data from DB
+                
+            } catch (\Exception $e) {
+                Log::error('Error updating payment record', [
+                    'exception' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                throw $e;
+            }
+            
+        } else {
+            // Create new record
+            $paymentRecord = PaymentModel::create(array_merge(['form_id' => $id], $updateData));
+            
+            Log::info('Created new payment record', [
+                'record_id' => $paymentRecord->id,
+                'created_fields' => $updateData
+            ]);
+        }
+        
+        Log::info('Final payment record state', [
+            'payment_record_id' => $paymentRecord->id,
+            'form_id' => $paymentRecord->form_id,
+            'payment_id' => $paymentRecord->payment_id,
+            'amount' => $paymentRecord->amount,
+            'form_type_id' => $paymentRecord->form_type_id,
+            'order_id' => $paymentRecord->order_id,
+            'status' => $paymentRecord->status,
+            'updated_at' => $paymentRecord->updated_at
+        ]);
+        
+        // Double-check by querying the database directly
+        $directDbQuery = DB::table('payment_details')->where('id', $paymentRecord->id)->first();
+        Log::info('Direct database query result', [
+            'db_record' => (array) $directDbQuery
+        ]);
 
         // Encrypt the data
         $encryptedData = $this->encrypt($requestParameter, $key);

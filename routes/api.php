@@ -87,6 +87,7 @@ Route::group(['middleware' => 'api'], function() {
         Route::post('getPetDogApplications', [DynamicPetDogController::class, 'getAllApplications']); // Alternative route name
         Route::post('pet-dog/application-details', [DynamicPetDogController::class, 'getApplicationDetails']);
         Route::post('getPetDogApplicationDetails', [DynamicPetDogController::class, 'getApplicationDetails']); // Alternative route name
+        Route::post('pet-dog/update-payment-status', [DynamicPetDogController::class, 'updatePaymentStatus']); // Update payment status
         
         Route::get('jobs', [JobController::class, 'getJobs']);
         Route::post('getApplicationProgress', [JobController::class, 'getApplicationProgress']);
@@ -133,8 +134,18 @@ Route::group(['middleware' => 'api'], function() {
     Route::options('files/{filename}', [JobController::class, 'serveFileOptions'])->name('api.files.options');
     
     // Admit Card API Routes
-    Route::post('admit-card/verify', [AdmitCardController::class, 'verify']);
-    Route::get('admit-card/download/{admit_no}', [AdmitCardController::class, 'download']);
+    Route::prefix('admit-card')->group(function () {
+        // Health check endpoint
+        Route::get('/health', [AdmitCardController::class, 'healthCheck']);
+        
+        // NEW: Email-based consolidated exam schedule
+        Route::post('/exam-schedule', [AdmitCardController::class, 'getExamSchedule']);
+        Route::get('/download-consolidated/{encoded_email}', [AdmitCardController::class, 'downloadConsolidated']);
+        
+        // EXISTING: Individual admit card operations
+        Route::post('/verify', [AdmitCardController::class, 'verify']);
+        Route::get('/download/{admit_no}', [AdmitCardController::class, 'download']);
+    });
     
     // Test route for Flutter Web debugging
     Route::get('test-admit-card', function () {
@@ -143,8 +154,10 @@ Route::group(['middleware' => 'api'], function() {
             'message' => 'Admit Card API is working',
             'timestamp' => now(),
             'endpoints' => [
+                'exam_schedule' => url('/api/admit-card/exam-schedule'),
                 'verify' => url('/api/admit-card/verify'),
-                'download' => url('/api/admit-card/download/{admit_no}')
+                'download_individual' => url('/api/admit-card/download/{admit_no}'),
+                'download_consolidated' => url('/api/admit-card/download-consolidated/{encoded_email}')
             ]
         ]);
     });

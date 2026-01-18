@@ -20,23 +20,12 @@ return [
     'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
     /*
-     * Allow multiple origins for production deployment
-     * Include both your frontend domain and backend domain
+     * Allow all origins for production debugging
+     * Change back to specific domains once working
      */
-    'allowed_origins' => [
-        'https://turamunicipalboard.com',
-        'https://www.turamunicipalboard.com',
-        'https://laravelv2.turamunicipalboard.com',
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        env('FRONTEND_URL', env('APP_URL'))
-    ],
+    'allowed_origins' => ['*'],
 
-    'allowed_origins_patterns' => [
-        '#^https://.*\.turamunicipalboard\.com$#',
-        '#^http://localhost:\d+$#',
-        '#^http://127\.0\.0\.1:\d+$#'
-    ],
+    'allowed_origins_patterns' => [],
 
     'allowed_headers' => [
         'Accept',

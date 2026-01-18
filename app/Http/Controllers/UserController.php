@@ -405,22 +405,37 @@ public function login(Request $request)
             // Attempt to authenticate the user using the token
             if (auth()->check()) {
                 auth()->logout();
-                return response()->json([
+                $response = response()->json([
                     'status' => 'success',
                     'message' => 'User successfully signed out'
                 ], 200);
+                
+                // Add CORS headers
+                return $response->header('Access-Control-Allow-Origin', '*')
+                              ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                              ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
             } else {
-                return response()->json([
+                $response = response()->json([
                     'status' => 'error',
                     'message' => 'Token is invalid or expired'
                 ], 401);
+                
+                // Add CORS headers to error response too
+                return $response->header('Access-Control-Allow-Origin', '*')
+                              ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                              ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
             }
         } catch (\Exception $e) {
             // Handle the exception if token is expired or invalid
-            return response()->json([
+            $response = response()->json([
                 'status' => 'error',
                 'message' => 'Token is invalid or expired'
             ], 401);
+            
+            // Add CORS headers to exception response
+            return $response->header('Access-Control-Allow-Origin', '*')
+                          ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                          ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         }
     }
     

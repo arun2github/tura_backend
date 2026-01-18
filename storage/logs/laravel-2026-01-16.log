@@ -1,0 +1,12 @@
+[2026-01-16 17:39:45] production.ERROR: Uncaught PDOException: SQLSTATE[HY000]: General error: 1 near "DESCRIBE": syntax error in Command line code:7
+Stack trace:
+#0 Command line code(7): PDO->query('DESCRIBE paymen...')
+#1 {main}
+  thrown {"exception":"[object] (Symfony\\Component\\ErrorHandler\\Error\\FatalError(code: 0): Uncaught PDOException: SQLSTATE[HY000]: General error: 1 near \"DESCRIBE\": syntax error in Command line code:7
+Stack trace:
+#0 Command line code(7): PDO->query('DESCRIBE paymen...')
+#1 {main}
+  thrown at Command line code:7)
+[stacktrace]
+#0 {main}
+"} 
