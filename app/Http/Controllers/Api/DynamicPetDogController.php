@@ -29,10 +29,10 @@ class DynamicPetDogController extends Controller
                 'owner_phone' => 'required|string|min:10|max:15',
                 'owner_email' => 'required|email|max:100',
                 'owner_address' => 'required|string|between:10,300',
-                'ward_no' => 'required|string|between:1,50',
+                'ward_no' => 'required|string|between:2,100',
                 'district' => 'nullable|string|max:100', // Optional, will default to "West Garo Hills"
                 'pincode' => 'required|string|size:6',
-                'owner_aadhar_number' => 'required|string|size:12',
+                'owner_aadhar_number' => 'required|string',
                 'dog_name' => 'nullable|string|between:2,50',
                 'dog_breed' => 'nullable|string|between:2,50',
                 'dog_age' => 'required|integer|min:1|max:300', // Allow up to 300 for months

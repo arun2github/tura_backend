@@ -49,12 +49,12 @@
             display: table-cell;
             width: 20%;
             vertical-align: middle;
-            text-align: left;
+            text-align: center;
         }
         
         .header-center {
             display: table-cell;
-            width: 60%;
+            width: 100%;
             vertical-align: middle;
             text-align: center;
         }
@@ -107,7 +107,7 @@
         .reg-number-date .reg-cell {
             display: table-cell;
             width: 33.33%;
-            padding: 3px;
+            padding: 1px 2px;
             text-align: center;
             vertical-align: middle;
         }
@@ -138,7 +138,7 @@
         .info-row {
             display: table;
             width: 100%;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
             font-size: 10px;
             border-collapse: collapse;
         }
@@ -146,7 +146,7 @@
         .info-item {
             display: table-cell;
             width: 50%;
-            padding: 2px 3px;
+            padding: 1px 2px;
             vertical-align: top;
         }
         
@@ -273,7 +273,7 @@
         <!-- Header -->
         <div class="header-section">
             <div class="header-flex">
-                <div class="header-left">
+                <!-- <div class="header-left">
                     @php
                         $defaultLogoPath = public_path('images/email/logo.png');
                     @endphp
@@ -282,26 +282,32 @@
                     @else
                         <div class="logo" style="border:1px solid #000; display:flex; align-items:center; justify-content:center; font-size:6px; font-weight:bold; width:50px; height:50px;">LOGO</div>
                     @endif
-                </div>
+                </div> -->
                 <div class="header-center">
+                      @php
+                        $defaultLogoPath = public_path('images/email/logo.png');
+                    @endphp
+                    @if(file_exists($defaultLogoPath))
+                        <img src="{{ asset('images/email/logo.png') }}" class="logo" alt="Logo">
+                    @else
+                        <div class="logo" style="border:1px solid #000; display:flex; align-items:center; justify-content:center; font-size:6px; font-weight:bold; width:50px; height:50px;">LOGO</div>
+                    @endif
                     <div class="header-text">
                         <h1>TURA MUNICIPAL BOARD</h1>
                         <p>WEST GARO HILLS, Meghalaya</p>
                         <p>Established: 12-09-1979</p>
                     </div>
                 </div>
-                <div class="header-right">
-                    <!-- Empty right column -->
-                </div>
+             
             </div>
             <div class="certificate-title">CERTIFICATE OF REGISTRATION OF PET DOG UNDER SECTION 128<br>OF MEGHALAYA MUNICIPAL ACT, 1973</div>
         </div>
 
         <!-- Registration Number and Date -->
         <div class="reg-number-date">
-            <div class="reg-cell">PET REGISTRATION NO {{ $registration_number ?? '' }}</div>
-            <div class="reg-cell">PET TAG NO {{ $pet_tag_number ?? '' }}</div>
-            <div class="reg-cell">DATE OF REGISTRATION {{ isset($registration_date) && $registration_date ? date('d/m/Y', strtotime($registration_date)) : date('d/m/Y') }}</div>
+            <div class="reg-cell">PET REGISTRATION NO: {{ $application_id ?? '' }}</div>
+            <div class="reg-cell">PET TAG NO: {{ $pet_tag_number ?? 'NA' }}</div>
+            <div class="reg-cell">DATE OF REGISTRATION: {{ isset($registration_date) && $registration_date ? date('d/m/Y', strtotime($registration_date)) : 'N/A' }}</div>
         </div>
 
         <div class="description">
@@ -328,7 +334,7 @@
                 <span class="field-value">{{ $owner_email ?? '' }}</span>
             </div>
             <div class="info-item">
-                <span class="field-label">Document ID</span>
+                <span class="field-label">Identification Number</span>
                 <span class="field-value">{{ $owner_aadhar_number ?? '' }}</span>
             </div>
         </div>
@@ -342,7 +348,7 @@
 
         <div class="info-row">
             <div class="info-item">
-                <span class="field-label">Ward No</span>
+                <span class="field-label">Locality</span>
                 <span class="field-value">{{ $ward_no ?? '' }}</span>
             </div>
             <div class="info-item">

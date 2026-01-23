@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Exceptions\MunicipalBoardException;
 use App\Models\FormEntityModel;
 use App\Models\FormMasterTblModel;
+use App\Models\PaymentModel;
 use App\Models\TradeLicenseFee;
 use App\Models\Forms;
 use Illuminate\Http\Request;
@@ -1513,7 +1514,8 @@ class FormController extends Controller
                 ], 404);
             }
 
-            // Note: Pet Dog Registration is auto-approved, no payment verification required
+            // Get payment details to use payment date as registration date
+            $payment = PaymentModel::where('form_id', $formMaster->application_id)->first();
 
             // Get form entity data
             $formEntities = FormEntityModel::where('form_id', $formMaster->id)->get();
@@ -1538,7 +1540,7 @@ class FormController extends Controller
                 // Registration details
                 'registration_number' => $registrationNumber,
                 'pet_tag_number' => $petTagNumber,
-                'registration_date' => $formData['registration_date'] ?? date('Y-m-d'),
+                'registration_date' => $payment && $payment->created_at ? $payment->created_at->format('Y-m-d') : ($formData['registration_date'] ?? $formMaster->inserted_at->format('Y-m-d')),
                 'application_id' => $request->application_id,
                 
                 // Owner details

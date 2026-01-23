@@ -15,8 +15,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\Artisan;
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
+// use PHPMailer\PHPMailer\PHPMailer; // Commented out due to class not found
+// use PHPMailer\PHPMailer\Exception; // Commented out due to class not found
 use Illuminate\Support\Facades\Hash;
 
 /**
@@ -118,6 +118,7 @@ public function register(Request $request)
             'phone_no' => $request->phone_no,
             'email' => $request->email,
             'password' => bcrypt($request->password),
+            'verifyemail' => 'active', // Set as active by default, email verification disabled
         ];
 
         $userObject = new User();
@@ -130,93 +131,46 @@ public function register(Request $request)
             }
 
             if ($existingUser->verifyemail === 'inactive') {
-                $token = JWTAuth::fromUser($existingUser);
-                $emailSent = false;
-                $emailError = null;
-
-                try {
-                    $emailSent = $this->sendMail($token, $request->email);
-                } catch (\Exception $e) {
-                    $emailError = $e->getMessage();
-                    Log::error('Verification email resend failed for existing user', [
-                        'user_id' => $existingUser->id,
-                        'email' => $request->email,
-                        'error' => $emailError
-                    ]);
-                }
-
-                Log::info('Resent verification email for existing unverified user', [
+                // Email verification disabled - activate user directly
+                $existingUser->verifyemail = 'active';
+                $existingUser->save();
+                
+                Log::info('Activated existing inactive user account', [
                     'user_id' => $existingUser->id,
                     'email' => $request->email,
-                    'email_sent' => $emailSent ? 'Yes' : 'No',
-                    'action' => 'duplicate_registration_prevented'
+                    'action' => 'direct_activation_no_email'
                 ]);
 
-                $responseMessage = 'User Successfully Registered';
-                $statusCode = 201;
-
-                if (!$emailSent && $emailError) {
-                    $responseMessage = 'User Registered Successfully, but verification email could not be sent. Please contact support to verify your account.';
-                    Log::warning('Existing user verification email resend failed', [
-                        'user_id' => $existingUser->id,
-                        'email' => $request->email,
-                        'error' => $emailError
-                    ]);
-                }
-
                 return response()->json([
-                    'status' => $emailSent ? 'success' : 'warning',
-                    'message' => $responseMessage,
+                    'status' => 'success',
+                    'message' => 'User Successfully Registered and Activated',
                     'user_id' => $existingUser->id,
-                    'email_sent' => $emailSent,
-                    'verification_required' => true,
-                    'email_error' => $emailSent ? null : 'SMTP Authentication Failed - Contact Administrator'
-                ], $statusCode);
+                    'email_sent' => false,
+                    'verification_required' => false,
+                    'email_verification_disabled' => true
+                ], 201);
             }
         }
 
         // New User Registration
         $userDetail = $userObject->saveUserDetails($userArray);
 
-        $token = JWTAuth::fromUser($userDetail);
-        $emailSent = false;
-        $emailError = null;
-
-        if ($userDetail) {
-            try {
-                $emailSent = $this->sendMail($token, $request->email);
-            } catch (\Exception $e) {
-                $emailError = $e->getMessage();
-                Log::error('Registration email failed during registration', [
-                    'user_id' => $userDetail->id,
-                    'email' => $request->email,
-                    'error' => $emailError
-                ]);
-            }
-        }
-
-        Log::info('Registered new user Email : ' . $request->email . ' Email Sent: ' . ($emailSent ? 'Yes' : 'No'));
-
-        $responseMessage = 'User Successfully Registered';
-        $statusCode = 201;
-
-        if (!$emailSent && $emailError) {
-            $responseMessage = 'User Registered Successfully, but verification email could not be sent. Please contact support to verify your account.';
-            Log::warning('User registered but email failed', [
-                'user_id' => $userDetail->id,
-                'email' => $request->email,
-                'error' => $emailError
-            ]);
-        }
+        // Email verification disabled - user is already active from registration
+        Log::info('Registered new user without email verification', [
+            'user_id' => $userDetail->id,
+            'email' => $request->email,
+            'verifyemail_status' => 'active',
+            'email_verification' => 'disabled'
+        ]);
 
         return response()->json([
-            'status' => $emailSent ? 'success' : 'warning',
-            'message' => $responseMessage,
+            'status' => 'success',
+            'message' => 'User Successfully Registered and Activated',
             'user_id' => $userDetail->id,
-            'email_sent' => $emailSent,
-            'verification_required' => true,
-            'email_error' => $emailSent ? null : 'SMTP Authentication Failed - Contact Administrator'
-        ], $statusCode);
+            'email_sent' => false,
+            'verification_required' => false,
+            'email_verification_disabled' => true
+        ], 201);
 
     } catch (MunicipalBoardException $exception) {
         Log::error('Invalid User');
@@ -255,15 +209,16 @@ public function login(Request $request)
             throw new MunicipalBoardException("Invalid Credentials", 401);
         }
 
-        // ✅ Step 4: Check if email is verified
+        // ✅ Step 4: Check if email is verified (now auto-activating)
         if ($user->verifyemail === 'inactive') {
-            $token = Auth::fromUser($user);
-            $this->sendMail($token, $request->email);
-
-            return response()->json([
-                'status' => 211,
-                'message' => 'Email not verified. Verification link has been sent again.'
-            ], 211);
+            // Email verification disabled - activate user directly
+            $user->verifyemail = 'active';
+            $user->save();
+            
+            Log::info('User activated during login - email verification disabled', [
+                'user_id' => $user->id,
+                'email' => $request->email
+            ]);
         }
 
         // ✅ Step 5: Safely fetch locality and ward (both optional)
@@ -561,12 +516,18 @@ public function login(Request $request)
         }
     }
 
+    // Email verification disabled - sendMail method commented out due to PHPMailer class not found
     public function sendMail($token,$email){
-        Log::info('Starting email sending process', [
+        Log::info('Email verification disabled - sendMail method called but not executed', [
             'email' => $email,
             'token_length' => strlen($token)
         ]);
         
+        // Commented out due to PHPMailer class not found error
+        // Email verification is now disabled and users are activated directly
+        return false;
+        
+        /*
         $url = url("/api/verifyEmail/" . $token);
         // Initialize PHPMailer
         $mail = new PHPMailer(true);
@@ -818,6 +779,7 @@ public function login(Request $request)
             ]);
             throw new \Exception('Message could not be sent. Mailer Error: ' . $e->getMessage());
         }
+        */
     }
     
     /**
@@ -854,39 +816,24 @@ public function login(Request $request)
                 ], 200);
             }
 
-            // Generate new token and send verification email
-            $token = JWTAuth::fromUser($user);
-            $emailSent = false;
-            $emailError = null;
+            // Email verification disabled - activate user directly instead of sending email
+            $user->verifyemail = 'active';
+            $user->save();
             
-            try {
-                $emailSent = $this->sendMail($token, $request->email);
-            } catch (\Exception $e) {
-                $emailError = $e->getMessage();
-                Log::error('Resend verification email failed', [
-                    'user_id' => $user->id,
-                    'email' => $request->email,
-                    'error' => $emailError
-                ]);
-            }
-            
-            Log::info('Resend verification email request', [
+            Log::info('User activated directly - email verification disabled', [
                 'user_id' => $user->id,
                 'email' => $request->email,
-                'email_sent' => $emailSent ? 'Yes' : 'No'
+                'action' => 'direct_activation_instead_of_email_resend'
             ]);
 
-            $responseMessage = $emailSent 
-                ? 'Verification email has been resent successfully.' 
-                : 'Failed to resend verification email. Please try again later or contact support.';
-
             return response()->json([
-                'status' => $emailSent ? 'success' : 'error',
-                'message' => $responseMessage,
+                'status' => 'success',
+                'message' => 'Account Successfully Activated - Email Verification Disabled',
                 'user_id' => $user->id,
-                'email_sent' => $emailSent,
-                'email_error' => $emailSent ? null : 'SMTP Authentication Failed - Contact Administrator'
-            ], $emailSent ? 200 : 500);
+                'email_sent' => false,
+                'verification_required' => false,
+                'email_verification_disabled' => true
+            ], 200);
 
         } catch (\Exception $e) {
             Log::error('Resend verification email exception', [
@@ -914,14 +861,16 @@ public function login(Request $request)
             $email = $request->input('email', 'test@example.com');
             $testToken = 'test-token-' . time();
             
-            // Test email sending
-            $result = $this->sendMail($testToken, $email);
+            // Test email sending (disabled)
+            // $result = $this->sendMail($testToken, $email);
+            $result = false; // Email verification is disabled
             
             return response()->json([
-                'status' => 'success',
-                'message' => 'Test email sent successfully',
+                'status' => 'info',
+                'message' => 'Email sending is currently disabled',
                 'email' => $email,
-                'email_sent' => $result
+                'email_sent' => $result,
+                'email_verification_disabled' => true
             ], 200);
             
         } catch (\Exception $e) {
